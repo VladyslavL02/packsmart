@@ -14,7 +14,7 @@ PackSmart is a packing-list app: a Vite + React 19 + TypeScript SPA styled with 
 - Prefer named exports
 - Keep the packing engine in `src/engine/` as pure logic, with no React or network imports
 - Validate external data (Open-Meteo, Gemini, Supabase rows) with Zod
-- Colors use the Tailwind theme tokens from `design-ref/palette.md` (already adjusted for Tailwind), not raw palette classes like `zinc-*` or `emerald-*`
+- Colors use the palette tokens already defined in the `@theme` block in `src/index.css` (e.g. `bg-surface`, `text-on-surface`, `text-primary`, `bg-primary-container`, `border-outline-variant`), not raw palette classes like `zinc-*`, `emerald-*` or `violet-*`, and not hex values
 - Icons use Lucide, not Material Symbols
 
 # Git
