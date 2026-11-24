@@ -17,7 +17,42 @@
       "Bash(git push * *:main)",
       "Bash(git push * *:refs/heads/main)",
       "Bash(git push)",
-      "Bash(git push origin)"
+      "Bash(git push origin)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr create *--base main*)",
+      "Bash(gh pr create *-B main*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean *)",
+      "Bash(git branch -D *)",
+      "Bash(git push *--delete*)",
+      "Bash(rm -rf *)",
+      "Bash(vercel --prod*)",
+      "Bash(vercel env *)",
+      "Bash(vercel rm *)",
+      "Bash(supabase db reset*)",
+      "Bash(supabase db push*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(./.env*)",
+      "Edit(./.env*)",
+      "Write(./.env*)",
+      "Read(**/.env*)",
+      "Edit(**/.env*)",
+      "Write(**/.env*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-env.sh"
+          }
+        ]
+      }
     ]
   }
 }
