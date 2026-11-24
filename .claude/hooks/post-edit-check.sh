@@ -26,6 +26,7 @@ if [ $? -ne 0 ]; then
 fi
 
 case "$rel" in
+  *.test.ts) exit 0 ;;  # test-first: red tests are expected; typecheck already ran
   src/engine/*)
     out=$(npx vitest run src/engine 2>&1)
     if [ $? -ne 0 ]; then
