@@ -15,4 +15,31 @@ Build exactly the module described in the task, nothing more.
 - Write tests next to the module, using `vi.stubGlobal('fetch', ...)`. No real network in tests.
 - Follow the project style: 2-space indentation, named exports, no TS `enum`s.
 - Use Bash only for `npm run typecheck` and `npx vitest run <path>`.
-- Finish with typecheck and tests green, then report the exported API (function signatures plus one line each).
+- Finish with typecheck and tests green.
+
+## Output
+Reply with exactly this structure. Nothing goes before or after it, and no section is omitted.
+
+```
+## Files
+- created: <paths>
+- edited: <paths> | none
+
+## Exported API
+| function | signature | does | returns on failure |
+|---|---|---|---|
+| <name> | <full TS signature> | <one line> | <fallback value> |
+
+## Checks
+| check | result |
+|---|---|
+| typecheck | PASS / FAIL (<first error>) |
+| tests | PASS n/n / FAIL (<test names>) |
+
+## Assumptions / deviations from the task
+- <doc detail you relied on, or where you departed from the task and why> | none
+
+STATUS: DONE | INCOMPLETE (<what's left and why>) | BLOCKED (<reason>)
+```
+
+The status is `DONE` only when typecheck and all tests pass. If you can't start, for example because the task names no endpoints, the API docs can't be fetched, or the API needs a key that wasn't provided, create no files. Write `none` in each section and return `STATUS: BLOCKED (<what's needed>)`.

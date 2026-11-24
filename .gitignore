@@ -29,3 +29,6 @@ dist-ssr
 design-ref/
 DEVLOG.md
 PLAN.md
+
+# change-verifier commit gate marker
+.claude/.verified-diff
