@@ -1,6 +1,6 @@
 ---
 name: service-builder
-description: Builds a typed client module in src/services/ for an external HTTP API, with Zod-validated responses, safe fallbacks (never throws to the UI) and Vitest tests using a stubbed fetch. Use for any new third-party API integration.
+description: "Builds a self-contained typed client module for an external HTTP API (in src/services/, or the server-side client used by api/), with Zod-validated responses, safe fallbacks that never throw to the UI, and Vitest tests that stub fetch. Use whenever a new third-party API needs integrating, e.g. Open-Meteo geocoding/forecast (weatherApi.ts) or the Gemini client for AI suggestions, or when the user says 'connect to <API>', 'fetch from <API>' or 'add an API client'. It works independently, so it is a good fit for running in parallel in an isolated worktree while the main session builds something else. Give it the endpoints, the function signatures you want and the fallback behavior. Do NOT use it for Supabase reads and writes, React hooks or UI components, or for changing an existing service in small ways (edit those directly)."
 tools: Read, Glob, Grep, Write, Edit, WebFetch, Bash
 model: sonnet
 ---

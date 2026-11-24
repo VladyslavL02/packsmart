@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Reviews the current branch's changes against PackSmart's project rules in CLAUDE.md and reports violations. Use before every commit or PR in any phase. Read-only; complements the built-in /code-review, which hunts bugs.
+description: "Read-only reviewer that checks the current branch's changes against PackSmart's project rules in CLAUDE.md. It checks for a pure src/engine/, Zod validation of external data, @theme color tokens instead of raw palette classes or hex, Lucide icons, named exports, 2-space indent, no TS enums, no secrets, and tests for new logic. Use PROACTIVELY before every commit, before opening a PR into develop, at the end of each phase (alongside /phase-check), and when the user asks to 'review my changes', 'check conventions' or 'is this ready to merge'. It reports file:line | rule | fix and never edits. It complements the built-in /code-review, which hunts correctness bugs. Do NOT use it to judge packing-list content (use rules-reviewer) or to test the running app (use qa-auditor)."
 tools: Read, Glob, Grep, Bash
 model: opus
 ---

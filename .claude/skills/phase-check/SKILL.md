@@ -1,6 +1,6 @@
 ---
 name: phase-check
-description: Run the end-of-phase quality gate (typecheck, tests, lint, Supabase security advisors) and print a pass/fail summary. Use before committing a phase or opening a PR.
+description: "Run PackSmart's quality gate (npm typecheck, Vitest tests, ESLint and the Supabase security advisors) and print a pass/fail table ending in READY or NOT READY. Use at the end of every development phase, before committing a finished feature, before opening or updating a PR into develop, before deploying, and when the user asks 'is everything green', 'run all checks', 'are we ready to commit/merge/ship' or 'check the project'. It only reports and never fixes anything, so fix the failures afterwards and run it again. Permissive-RLS advisor warnings are expected and marked accepted."
 allowed-tools: Bash(npm run typecheck), Bash(npm test), Bash(npm run lint), mcp__supabase__get_advisors
 model: haiku
 ---

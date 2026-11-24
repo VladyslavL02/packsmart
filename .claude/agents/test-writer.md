@@ -1,6 +1,6 @@
 ---
 name: test-writer
-description: Writes Vitest tests from a behavior spec before the implementation exists (test-first). Use when a module's expected behavior is known and tests are needed. Does not write or change implementation code.
+description: "Writes Vitest unit tests from a behavior spec, ideally before the implementation exists (test-first). Use PROACTIVELY before building new pure logic (the packing engine in src/engine/, item merging/dedupe, weather summarizing, date helpers), when the user asks to 'write tests', 'add test cases', 'cover scenarios' or 'do TDD', and when a bug needs a reproducing test before the fix. Give it the spec (behaviors, inputs, expected outputs) and the file to test. It only creates or edits *.test.ts files and reports which tests fail and why. Do NOT use it to implement or fix code, for browser/UI flows (use qa-auditor) or for tests of external APIs (service-builder writes those with the client)."
 tools: Read, Glob, Grep, Write, Edit, Bash
 model: sonnet
 ---

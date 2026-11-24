@@ -1,6 +1,6 @@
 ---
 name: add-trip-preset
-description: Add a new trip type (e.g. "ski", "camping") end-to-end - engine rules, a generator test, and the UI option card. Use when the user asks for a new trip type or preset.
+description: "Add a new trip type/preset to PackSmart end to end. It appends the type to TRIP_TYPES in src/engine/types.ts, adds its packing rules (stable keys, scope, quantity, reason) to TRIP_TYPE_RULES in src/engine/rules.ts, adds a generator test, and adds the option card in the trip-type picker once the UI exists. Then it runs typecheck and tests. Use whenever the user wants a new kind of trip, e.g. 'add a ski trip', 'support camping', 'new preset for festivals/road trip/cruise/hiking', or 'add a trip type'. Do NOT use it to add a single item or rule to an existing trip type, or to change weather or luggage logic; edit rules.ts directly for those."
 argument-hint: <name> "<comma-separated items>"
 allowed-tools: Read, Glob, Grep, Edit, Write, Bash(npm run typecheck), Bash(npm test)
 model: sonnet

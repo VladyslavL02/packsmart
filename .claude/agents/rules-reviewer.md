@@ -1,6 +1,6 @@
 ---
 name: rules-reviewer
-description: Read-only reviewer of the packing rules engine. Use after rules change to find missing essentials, items that contradict the weather or trip type, and wrong quantities. Reports findings; never edits.
+description: "Read-only domain reviewer of the packing list logic. It judges whether the generated lists make sense for real travelers, not code style. Use PROACTIVELY after creating or changing src/engine/rules.ts or generator.ts (new rules, weather thresholds, quantities, trip types, luggage or family logic), after running /add-trip-preset, and when the user asks 'is the packing list good', 'what items are missing' or 'review the rules'. It walks through sample trips and reports missing essentials, contradictions with weather or trip type, silly quantities and wrong shared/per-person scope, as at most 10 must-fix or nice-to-have findings. Never edits. Do NOT use it for convention or code-quality review (use code-reviewer) or for bug hunting (use /code-review)."
 tools: Read, Glob, Grep
 model: sonnet
 ---
