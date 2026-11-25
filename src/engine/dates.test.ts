@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { daysUntil, tripDays } from './dates'
+import { daysUntil, shiftYears, toIsoDate, tripDays } from './dates'
 
 // The date logic only uses UTC, so results must not depend on the process
 // timezone. We run the same assertions under zones that have DST changes.
@@ -44,6 +44,37 @@ describe.each(TIMEZONES)('dates under TZ=%s', (tz) => {
     it('handles a month and year boundary', () => {
       useTz()
       expect(tripDays('2026-12-30', '2027-01-02')).toBe(4)
+    })
+  })
+
+  describe('toIsoDate', () => {
+    it('formats the local calendar day with zero padding', () => {
+      useTz()
+      expect(toIsoDate(new Date(2026, 0, 5, 23, 59))).toBe('2026-01-05')
+    })
+
+    it('keeps the local day just after local midnight', () => {
+      useTz()
+      expect(toIsoDate(new Date(2026, 10, 25, 0, 1))).toBe('2026-11-25')
+    })
+  })
+
+  describe('shiftYears', () => {
+    it('moves the same month and day back by whole years', () => {
+      useTz()
+      expect(shiftYears('2027-07-10', -1)).toBe('2026-07-10')
+      expect(shiftYears('2027-07-10', -3)).toBe('2024-07-10')
+    })
+
+    it('moves forward too', () => {
+      useTz()
+      expect(shiftYears('2026-12-31', 1)).toBe('2027-12-31')
+    })
+
+    it('clamps Feb 29 to Feb 28 in a non-leap year and keeps it in a leap year', () => {
+      useTz()
+      expect(shiftYears('2028-02-29', -1)).toBe('2027-02-28')
+      expect(shiftYears('2028-02-29', -4)).toBe('2024-02-29')
     })
   })
 
