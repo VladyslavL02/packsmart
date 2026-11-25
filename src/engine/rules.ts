@@ -1,45 +1,46 @@
-import { tripDays } from './dates'
-import type { Category, LuggageType, TripInput, TripType, WeatherSummary } from './types'
+import { tripDays } from './dates';
+import type { Category, LuggageType, TripInput, TripType, WeatherSummary } from './types';
 
-export type WeatherFlags = { rain: boolean; cold: boolean; freezing: boolean; heat: boolean }
-export type PackingCapacity = 'light' | 'standard' | 'roomy' | 'spacious'
-export type RuleScope = 'shared' | 'everyone' | 'adult' | 'child'
+export type WeatherFlags = { rain: boolean; cold: boolean; freezing: boolean; heat: boolean };
+export type PackingCapacity = 'light' | 'standard' | 'roomy' | 'spacious';
+export type RuleScope = 'shared' | 'everyone' | 'adult' | 'child';
 
 export type RuleContext = {
-  input: TripInput
-  weather: WeatherSummary | null
-  days: number
-  hasChildren: boolean
-  flags: WeatherFlags
-  packingCapacity: PackingCapacity
-}
+  input: TripInput;
+  weather: WeatherSummary | null;
+  days: number;
+  hasChildren: boolean;
+  flags: WeatherFlags;
+  packingCapacity: PackingCapacity;
+};
 
 export type Rule = {
-  key: string
-  title: string
-  category: Category
-  appliesTo: RuleScope
-  quantity?: number | ((ctx: RuleContext) => number)
-  when?: (ctx: RuleContext) => boolean
-  reason?: string | ((ctx: RuleContext) => string)
-}
+  key: string;
+  title: string;
+  category: Category;
+  appliesTo: RuleScope;
+  quantity?: number | ((ctx: RuleContext) => number);
+  when?: (ctx: RuleContext) => boolean;
+  reason?: string | ((ctx: RuleContext) => string);
+};
 
 // --- Weather thresholds -------------------------------------------------
 
-export const RAIN_PROB_THRESHOLD = 50
-export const LIGHT_LAYER_MAX = 15
-export const COLD_MAX = 8
-export const FREEZING_MAX = 0
-export const HEAT_MIN = 27
+export const RAIN_PROB_THRESHOLD = 50;
+export const LIGHT_LAYER_MAX = 15;
+export const COLD_MAX = 8;
+export const FREEZING_MAX = 0;
+export const HEAT_MIN = 27;
 
 export function deriveWeatherFlags(weather: WeatherSummary | null): WeatherFlags {
-  if (!weather) return { rain: false, cold: false, freezing: false, heat: false }
+  if (!weather) {return { rain: false, cold: false, freezing: false, heat: false };}
+
   return {
     rain: weather.rainDays >= 1 || weather.maxPrecipProbability >= RAIN_PROB_THRESHOLD,
     cold: weather.minTemp <= COLD_MAX,
     freezing: weather.minTemp <= FREEZING_MAX,
     heat: weather.maxTemp >= HEAT_MIN,
-  }
+  };
 }
 
 // --- Packing capacity ---------------------------------------------------
@@ -52,17 +53,17 @@ export const BAG_LITERS: Record<LuggageType, number> = {
   personal: 20,
   carryOn: 40,
   checked: 90,
-}
+};
 
 /** Children's clothes take about half the room of an adult's. */
-const CHILD_SPACE_WEIGHT = 0.5
+const CHILD_SPACE_WEIGHT = 0.5;
 
 /** Liters per traveler unit at which each tier starts. Below the first value is 'light'. */
 export const CAPACITY_MIN_LITERS: Record<Exclude<PackingCapacity, 'light'>, number> = {
   standard: 30,
   roomy: 70,
   spacious: 120,
-}
+};
 
 export const CLOTHING_CAPS: Record<
   PackingCapacity,
@@ -72,19 +73,20 @@ export const CLOTHING_CAPS: Record<
   standard: { underwear: 7, tshirts: 5, formal: 3 },
   roomy: { underwear: 10, tshirts: 7, formal: 5 },
   spacious: { underwear: 10, tshirts: 7, formal: 7 },
-}
+};
 
 export function computePackingCapacity(input: TripInput): PackingCapacity {
-  const totalLiters = input.luggage.reduce((sum, bag) => sum + bag.count * BAG_LITERS[bag.type], 0)
+  const totalLiters = input.luggage.reduce((sum, bag) => sum + bag.count * BAG_LITERS[bag.type], 0);
   const units = input.members.reduce(
     (sum, member) => sum + (member.kind === 'child' ? CHILD_SPACE_WEIGHT : 1),
     0,
-  )
-  const litersPerUnit = totalLiters / units
-  if (litersPerUnit >= CAPACITY_MIN_LITERS.spacious) return 'spacious'
-  if (litersPerUnit >= CAPACITY_MIN_LITERS.roomy) return 'roomy'
-  if (litersPerUnit >= CAPACITY_MIN_LITERS.standard) return 'standard'
-  return 'light'
+  );
+  const litersPerUnit = totalLiters / units;
+  if (litersPerUnit >= CAPACITY_MIN_LITERS.spacious) {return 'spacious';}
+  if (litersPerUnit >= CAPACITY_MIN_LITERS.roomy) {return 'roomy';}
+  if (litersPerUnit >= CAPACITY_MIN_LITERS.standard) {return 'standard';}
+
+  return 'light';
 }
 
 export function buildRuleContext(input: TripInput, weather: WeatherSummary | null): RuleContext {
@@ -95,32 +97,32 @@ export function buildRuleContext(input: TripInput, weather: WeatherSummary | nul
     hasChildren: input.members.some((member) => member.kind === 'child'),
     flags: deriveWeatherFlags(weather),
     packingCapacity: computePackingCapacity(input),
-  }
+  };
 }
 
 // --- Helpers ------------------------------------------------------------
 
 function hasLuggage(ctx: RuleContext, type: LuggageType): boolean {
-  return ctx.input.luggage.some((bag) => bag.type === type)
+  return ctx.input.luggage.some((bag) => bag.type === type);
 }
 
 function withSeasonalNote(ctx: RuleContext, text: string): string {
-  return ctx.weather?.isSeasonalEstimate ? `${text} (seasonal estimate)` : text
+  return ctx.weather?.isSeasonalEstimate ? `${text} (seasonal estimate)` : text;
 }
 
 function degrees(value: number): string {
-  return `${Math.round(value)}°C`
+  return `${Math.round(value)}°C`;
 }
 
 function underwearCap(ctx: RuleContext): number {
-  return CLOTHING_CAPS[ctx.packingCapacity].underwear
+  return CLOTHING_CAPS[ctx.packingCapacity].underwear;
 }
 
 function washesNeeded(ctx: RuleContext): number {
-  return Math.max(0, Math.ceil((ctx.days + 1) / underwearCap(ctx)) - 1)
+  return Math.max(0, Math.ceil((ctx.days + 1) / underwearCap(ctx)) - 1);
 }
 
-const underwearQuantity = (ctx: RuleContext) => Math.min(ctx.days + 1, underwearCap(ctx))
+const underwearQuantity = (ctx: RuleContext) => Math.min(ctx.days + 1, underwearCap(ctx));
 
 const rainReason = (ctx: RuleContext) =>
   withSeasonalNote(
@@ -128,31 +130,31 @@ const rainReason = (ctx: RuleContext) =>
     ctx.weather && ctx.weather.rainDays >= 1
       ? `Rain expected on ${ctx.weather.rainDays} ${ctx.weather.rainDays === 1 ? 'day' : 'days'}`
       : `Up to ${ctx.weather?.maxPrecipProbability ?? 0}% chance of rain`,
-  )
+  );
 const coldReason = (ctx: RuleContext) =>
-  withSeasonalNote(ctx, `Lows around ${degrees(ctx.weather?.minTemp ?? 0)}`)
+  withSeasonalNote(ctx, `Lows around ${degrees(ctx.weather?.minTemp ?? 0)}`);
 const freezingReason = (ctx: RuleContext) =>
-  withSeasonalNote(ctx, `Lows down to ${degrees(ctx.weather?.minTemp ?? 0)}`)
+  withSeasonalNote(ctx, `Lows down to ${degrees(ctx.weather?.minTemp ?? 0)}`);
 const heatReason = (ctx: RuleContext) =>
-  withSeasonalNote(ctx, `Highs up to ${degrees(ctx.weather?.maxTemp ?? 0)}`)
+  withSeasonalNote(ctx, `Highs up to ${degrees(ctx.weather?.maxTemp ?? 0)}`);
 
 // Beach and mountain trips need sun gear even when the forecast stays below the heat threshold
 // (water reflects the sun, and UV is stronger at altitude).
 const needsSunProtection = (ctx: RuleContext) =>
-  ctx.flags.heat || ctx.input.tripType === 'beach' || ctx.input.tripType === 'mountains'
+  ctx.flags.heat || ctx.input.tripType === 'beach' || ctx.input.tripType === 'mountains';
 const sunReason = (ctx: RuleContext) =>
   ctx.flags.heat
     ? heatReason(ctx)
     : ctx.input.tripType === 'mountains'
       ? 'Stronger sun at altitude'
-      : 'Sun exposure on a beach trip'
+      : 'Sun exposure on a beach trip';
 
 // Mountain trips get cold hands and ears well above freezing, especially in rain.
 const needsHandsAndHead = (ctx: RuleContext) =>
-  ctx.flags.freezing || (ctx.flags.cold && ctx.input.tripType === 'mountains')
+  ctx.flags.freezing || (ctx.flags.cold && ctx.input.tripType === 'mountains');
 
 const onlyWithBags = (ctx: RuleContext) =>
-  hasLuggage(ctx, 'checked') && (hasLuggage(ctx, 'carryOn') || hasLuggage(ctx, 'personal'))
+  hasLuggage(ctx, 'checked') && (hasLuggage(ctx, 'carryOn') || hasLuggage(ctx, 'personal'));
 
 // --- Rule groups --------------------------------------------------------
 
@@ -219,11 +221,12 @@ export const BASE_RULES: Rule[] = [
     appliesTo: 'shared',
     when: (ctx) => ctx.days + 1 > underwearCap(ctx),
     reason: (ctx) => {
-      const washes = washesNeeded(ctx)
-      return `${ctx.days}-day trip: plan ${washes} ${washes === 1 ? 'wash' : 'washes'}`
+      const washes = washesNeeded(ctx);
+
+      return `${ctx.days}-day trip: plan ${washes} ${washes === 1 ? 'wash' : 'washes'}`;
     },
   },
-]
+];
 
 export const WEATHER_RULES: Rule[] = [
   {
@@ -273,7 +276,9 @@ export const WEATHER_RULES: Rule[] = [
     category: 'clothing',
     appliesTo: 'everyone',
     // Cool but not cold enough for the warm jacket.
-    when: (ctx) => ctx.weather !== null && !ctx.flags.cold && ctx.weather.minTemp <= LIGHT_LAYER_MAX,
+    when: (ctx) => (
+      ctx.weather !== null && !ctx.flags.cold && ctx.weather.minTemp <= LIGHT_LAYER_MAX
+    ),
     reason: (ctx) =>
       withSeasonalNote(ctx, `Lows around ${degrees(ctx.weather?.minTemp ?? 0)}`),
   },
@@ -352,7 +357,7 @@ export const WEATHER_RULES: Rule[] = [
     when: needsSunProtection,
     reason: sunReason,
   },
-]
+];
 
 export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
   city: [
@@ -409,7 +414,7 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
     { key: 'casual-shoes', title: 'Casual shoes', category: 'clothing', appliesTo: 'adult' },
     { key: 'laptop-bag', title: 'Laptop bag', category: 'misc', appliesTo: 'adult' },
   ],
-}
+};
 
 export const LUGGAGE_RULES: Rule[] = [
   {
@@ -444,7 +449,7 @@ export const LUGGAGE_RULES: Rule[] = [
     when: onlyWithBags,
     reason: 'Keep essentials with you, not in the checked bag',
   },
-]
+];
 
 export const FAMILY_RULES: Rule[] = [
   {
@@ -475,4 +480,4 @@ export const FAMILY_RULES: Rule[] = [
     appliesTo: 'child',
     when: (ctx) => ctx.hasChildren,
   },
-]
+];

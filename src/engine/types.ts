@@ -1,8 +1,8 @@
-import { z } from 'zod'
+import { z } from 'zod';
 
 // /add-trip-preset appends to TRIP_TYPES.
-export const TRIP_TYPES = ['city', 'mountains', 'beach', 'business'] as const
-export const LUGGAGE = ['personal', 'carryOn', 'checked'] as const
+export const TRIP_TYPES = ['city', 'mountains', 'beach', 'business'] as const;
+export const LUGGAGE = ['personal', 'carryOn', 'checked'] as const;
 export const CATEGORIES = [
   'clothing',
   'toiletries',
@@ -11,25 +11,25 @@ export const CATEGORIES = [
   'health',
   'kids',
   'misc',
-] as const
+] as const;
 // 'everyone' is expanded per member by mergeItems; the DB scope stays shared | adult | child.
-export const AI_SCOPES = ['shared', 'everyone', 'adult', 'child'] as const
+export const AI_SCOPES = ['shared', 'everyone', 'adult', 'child'] as const;
 
-export const TripTypeSchema = z.enum(TRIP_TYPES)
-export const LuggageTypeSchema = z.enum(LUGGAGE)
-export const CategorySchema = z.enum(CATEGORIES)
+export const TripTypeSchema = z.enum(TRIP_TYPES);
+export const LuggageTypeSchema = z.enum(LUGGAGE);
+export const CategorySchema = z.enum(CATEGORIES);
 
 export const MemberSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   kind: z.enum(['adult', 'child']),
-})
+});
 
 // A family can bring several bags of the same type, so luggage is a count per type.
 export const LuggageEntrySchema = z.object({
   type: LuggageTypeSchema,
   count: z.number().int().min(1),
-})
+});
 
 export const TripInputSchema = z
   .object({
@@ -54,7 +54,7 @@ export const TripInputSchema = z
   .refine((trip) => trip.endDate >= trip.startDate, {
     message: 'endDate must be on or after startDate',
     path: ['endDate'],
-  })
+  });
 
 export const WeatherSummarySchema = z.object({
   minTemp: z.number(),
@@ -63,9 +63,9 @@ export const WeatherSummarySchema = z.object({
   rainDays: z.number().int().min(0),
   isSeasonalEstimate: z.boolean(),
   source: z.enum(['forecast', 'seasonal']),
-})
+});
 
-export const AiScopeSchema = z.enum(AI_SCOPES)
+export const AiScopeSchema = z.enum(AI_SCOPES);
 
 // What /api/suggest returns, before mergeItems expands it per member.
 export const AiSuggestionSchema = z.object({
@@ -74,13 +74,13 @@ export const AiSuggestionSchema = z.object({
   scope: AiScopeSchema,
   quantity: z.number().int().min(1).max(10).default(1),
   reason: z.string().max(140).nullable(),
-})
+});
 
 export const SuggestRequestSchema = z.object({
   trip: TripInputSchema,
   weather: WeatherSummarySchema.nullable(),
   existingTitles: z.array(z.string()).max(150),
-})
+});
 
 export const PackingItemDraftSchema = z.object({
   key: z.string().min(1).nullable(),
@@ -91,24 +91,24 @@ export const PackingItemDraftSchema = z.object({
   quantity: z.number().int().min(1),
   source: z.enum(['rules', 'ai', 'user']),
   reason: z.string().nullable(),
-})
+});
 
 // DB row shape, used in Phase 6.
 export const PackingItemSchema = PackingItemDraftSchema.extend({
   id: z.string().min(1),
   tripId: z.string().min(1),
   isPacked: z.boolean(),
-})
+});
 
-export type TripType = z.infer<typeof TripTypeSchema>
-export type LuggageType = z.infer<typeof LuggageTypeSchema>
-export type Category = z.infer<typeof CategorySchema>
-export type Member = z.infer<typeof MemberSchema>
-export type LuggageEntry = z.infer<typeof LuggageEntrySchema>
-export type TripInput = z.infer<typeof TripInputSchema>
-export type WeatherSummary = z.infer<typeof WeatherSummarySchema>
-export type AiScope = z.infer<typeof AiScopeSchema>
-export type AiSuggestion = z.infer<typeof AiSuggestionSchema>
-export type SuggestRequest = z.infer<typeof SuggestRequestSchema>
-export type PackingItemDraft = z.infer<typeof PackingItemDraftSchema>
-export type PackingItem = z.infer<typeof PackingItemSchema>
+export type TripType = z.infer<typeof TripTypeSchema>;
+export type LuggageType = z.infer<typeof LuggageTypeSchema>;
+export type Category = z.infer<typeof CategorySchema>;
+export type Member = z.infer<typeof MemberSchema>;
+export type LuggageEntry = z.infer<typeof LuggageEntrySchema>;
+export type TripInput = z.infer<typeof TripInputSchema>;
+export type WeatherSummary = z.infer<typeof WeatherSummarySchema>;
+export type AiScope = z.infer<typeof AiScopeSchema>;
+export type AiSuggestion = z.infer<typeof AiSuggestionSchema>;
+export type SuggestRequest = z.infer<typeof SuggestRequestSchema>;
+export type PackingItemDraft = z.infer<typeof PackingItemDraftSchema>;
+export type PackingItem = z.infer<typeof PackingItemSchema>;

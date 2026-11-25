@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest';
 import {
   AI_SCOPES,
   AiSuggestionSchema,
@@ -11,7 +11,7 @@ import {
   TRIP_TYPES,
   TripInputSchema,
   WeatherSummarySchema,
-} from './types'
+} from './types';
 
 const validWeather = (overrides: Record<string, unknown> = {}) => ({
   minTemp: 8,
@@ -21,7 +21,7 @@ const validWeather = (overrides: Record<string, unknown> = {}) => ({
   isSeasonalEstimate: false,
   source: 'forecast',
   ...overrides,
-})
+});
 
 const validTrip = (overrides: Record<string, unknown> = {}) => ({
   city: 'Lisbon',
@@ -33,7 +33,7 @@ const validTrip = (overrides: Record<string, unknown> = {}) => ({
   luggage: [{ type: 'carryOn', count: 1 }],
   members: [{ id: 'm1', name: 'Anna', kind: 'adult' }],
   ...overrides,
-})
+});
 
 const validDraft = (overrides: Record<string, unknown> = {}) => ({
   key: 'passport',
@@ -45,7 +45,7 @@ const validDraft = (overrides: Record<string, unknown> = {}) => ({
   source: 'rules',
   reason: null,
   ...overrides,
-})
+});
 
 const validSuggestion = (overrides: Record<string, unknown> = {}) => ({
   title: 'Plug adapter type G',
@@ -54,7 +54,7 @@ const validSuggestion = (overrides: Record<string, unknown> = {}) => ({
   quantity: 2,
   reason: 'UK sockets differ from EU ones',
   ...overrides,
-})
+});
 
 const validItem = (overrides: Record<string, unknown> = {}) => ({
   ...validDraft(),
@@ -62,151 +62,152 @@ const validItem = (overrides: Record<string, unknown> = {}) => ({
   tripId: 'trip-1',
   isPacked: false,
   ...overrides,
-})
+});
 
 const without = (obj: Record<string, unknown>, key: string) => {
-  const copy = { ...obj }
-  delete copy[key]
-  return copy
-}
+  const copy = { ...obj };
+  delete copy[key];
+
+  return copy;
+};
 
 describe('TripInputSchema', () => {
   it('parses a valid trip', () => {
-    expect(TripInputSchema.safeParse(validTrip()).success).toBe(true)
-  })
+    expect(TripInputSchema.safeParse(validTrip()).success).toBe(true);
+  });
 
   it('allows multiple bags of different types with counts', () => {
     const luggage = [
       { type: 'checked', count: 3 },
       { type: 'carryOn', count: 2 },
-    ]
-    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(true)
-  })
+    ];
+    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(true);
+  });
 
   it('rejects a luggage count of 0', () => {
-    const luggage = [{ type: 'checked', count: 0 }]
-    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false)
-  })
+    const luggage = [{ type: 'checked', count: 0 }];
+    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false);
+  });
 
   it('rejects duplicate luggage types', () => {
     const luggage = [
       { type: 'checked', count: 1 },
       { type: 'checked', count: 2 },
-    ]
-    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false)
-  })
+    ];
+    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false);
+  });
 
   it('rejects an endDate earlier than startDate', () => {
-    const trip = validTrip({ startDate: '2026-06-05', endDate: '2026-06-04' })
-    const result = TripInputSchema.safeParse(trip)
-    expect(result.success).toBe(false)
-    expect(result.error?.issues.map((issue) => issue.path)).toContainEqual(['endDate'])
-  })
+    const trip = validTrip({ startDate: '2026-06-05', endDate: '2026-06-04' });
+    const result = TripInputSchema.safeParse(trip);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.path)).toContainEqual(['endDate']);
+  });
 
   it.each(['2026-02-31', '2026-13-01'])('rejects the impossible startDate %s', (startDate) => {
-    expect(TripInputSchema.safeParse(validTrip({ startDate })).success).toBe(false)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ startDate })).success).toBe(false);
+  });
 
   it('accepts the leap day 2028-02-29', () => {
-    const trip = validTrip({ startDate: '2028-02-29', endDate: '2028-03-01' })
-    expect(TripInputSchema.safeParse(trip).success).toBe(true)
-  })
+    const trip = validTrip({ startDate: '2028-02-29', endDate: '2028-03-01' });
+    expect(TripInputSchema.safeParse(trip).success).toBe(true);
+  });
 
   it('accepts an endDate equal to startDate', () => {
-    const trip = validTrip({ startDate: '2026-06-05', endDate: '2026-06-05' })
-    expect(TripInputSchema.safeParse(trip).success).toBe(true)
-  })
+    const trip = validTrip({ startDate: '2026-06-05', endDate: '2026-06-05' });
+    expect(TripInputSchema.safeParse(trip).success).toBe(true);
+  });
 
   it('rejects an empty luggage array', () => {
-    expect(TripInputSchema.safeParse(validTrip({ luggage: [] })).success).toBe(false)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ luggage: [] })).success).toBe(false);
+  });
 
   it('rejects an empty members array', () => {
-    expect(TripInputSchema.safeParse(validTrip({ members: [] })).success).toBe(false)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ members: [] })).success).toBe(false);
+  });
 
   it('accepts notes of 500 characters', () => {
-    const trip = validTrip({ notes: 'a'.repeat(500) })
-    expect(TripInputSchema.safeParse(trip).success).toBe(true)
-  })
+    const trip = validTrip({ notes: 'a'.repeat(500) });
+    expect(TripInputSchema.safeParse(trip).success).toBe(true);
+  });
 
   it('rejects notes of 501 characters', () => {
-    const trip = validTrip({ notes: 'a'.repeat(501) })
-    expect(TripInputSchema.safeParse(trip).success).toBe(false)
-  })
+    const trip = validTrip({ notes: 'a'.repeat(501) });
+    expect(TripInputSchema.safeParse(trip).success).toBe(false);
+  });
 
   it('rejects a bad date format', () => {
-    const trip = validTrip({ startDate: '2026/06/01' })
-    expect(TripInputSchema.safeParse(trip).success).toBe(false)
-  })
+    const trip = validTrip({ startDate: '2026/06/01' });
+    expect(TripInputSchema.safeParse(trip).success).toBe(false);
+  });
 
   it.each([90, -90])('accepts a latitude of %s', (latitude) => {
-    expect(TripInputSchema.safeParse(validTrip({ latitude })).success).toBe(true)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ latitude })).success).toBe(true);
+  });
 
   it.each([90.1, -90.1])('rejects a latitude of %s', (latitude) => {
-    expect(TripInputSchema.safeParse(validTrip({ latitude })).success).toBe(false)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ latitude })).success).toBe(false);
+  });
 
   it.each([180, -180])('accepts a longitude of %s', (longitude) => {
-    expect(TripInputSchema.safeParse(validTrip({ longitude })).success).toBe(true)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ longitude })).success).toBe(true);
+  });
 
   it.each([180.1, -180.1])('rejects a longitude of %s', (longitude) => {
-    expect(TripInputSchema.safeParse(validTrip({ longitude })).success).toBe(false)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ longitude })).success).toBe(false);
+  });
 
   it('rejects an unknown tripType', () => {
-    expect(TripInputSchema.safeParse(validTrip({ tripType: 'safari' })).success).toBe(false)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ tripType: 'safari' })).success).toBe(false);
+  });
 
   it.each(TRIP_TYPES)('accepts the tripType %s', (tripType) => {
-    expect(TripInputSchema.safeParse(validTrip({ tripType })).success).toBe(true)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ tripType })).success).toBe(true);
+  });
 
   it('rejects an empty city', () => {
-    expect(TripInputSchema.safeParse(validTrip({ city: '' })).success).toBe(false)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ city: '' })).success).toBe(false);
+  });
 
   it('rejects a member with an empty id', () => {
-    const members = [{ id: '', name: 'Anna', kind: 'adult' }]
-    expect(TripInputSchema.safeParse(validTrip({ members })).success).toBe(false)
-  })
+    const members = [{ id: '', name: 'Anna', kind: 'adult' }];
+    expect(TripInputSchema.safeParse(validTrip({ members })).success).toBe(false);
+  });
 
   it('rejects a member with an empty name', () => {
-    const members = [{ id: 'm1', name: '', kind: 'adult' }]
-    expect(TripInputSchema.safeParse(validTrip({ members })).success).toBe(false)
-  })
+    const members = [{ id: 'm1', name: '', kind: 'adult' }];
+    expect(TripInputSchema.safeParse(validTrip({ members })).success).toBe(false);
+  });
 
   it('rejects a member with kind pet', () => {
-    const members = [{ id: 'm1', name: 'Rex', kind: 'pet' }]
-    expect(TripInputSchema.safeParse(validTrip({ members })).success).toBe(false)
-  })
+    const members = [{ id: 'm1', name: 'Rex', kind: 'pet' }];
+    expect(TripInputSchema.safeParse(validTrip({ members })).success).toBe(false);
+  });
 
   it('accepts a member with kind child', () => {
-    const members = [{ id: 'm1', name: 'Mia', kind: 'child' }]
-    expect(TripInputSchema.safeParse(validTrip({ members })).success).toBe(true)
-  })
+    const members = [{ id: 'm1', name: 'Mia', kind: 'child' }];
+    expect(TripInputSchema.safeParse(validTrip({ members })).success).toBe(true);
+  });
 
   it('rejects a luggage entry with an unknown type', () => {
-    const luggage = [{ type: 'trunk', count: 1 }]
-    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false)
-  })
+    const luggage = [{ type: 'trunk', count: 1 }];
+    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false);
+  });
 
   it('rejects a fractional luggage count', () => {
-    const luggage = [{ type: 'checked', count: 1.5 }]
-    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false)
-  })
+    const luggage = [{ type: 'checked', count: 1.5 }];
+    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false);
+  });
 
   it('accepts a large luggage count with no upper cap', () => {
-    const luggage = [{ type: 'checked', count: 10 }]
-    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(true)
-  })
+    const luggage = [{ type: 'checked', count: 10 }];
+    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(true);
+  });
 
   it.each(LUGGAGE)('accepts %s as a single luggage entry', (type) => {
-    const luggage = [{ type, count: 1 }]
-    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(true)
-  })
+    const luggage = [{ type, count: 1 }];
+    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(true);
+  });
 
   it.each([
     'city',
@@ -218,58 +219,58 @@ describe('TripInputSchema', () => {
     'luggage',
     'members',
   ])('rejects a trip missing %s', (field) => {
-    expect(TripInputSchema.safeParse(without(validTrip(), field)).success).toBe(false)
-  })
+    expect(TripInputSchema.safeParse(without(validTrip(), field)).success).toBe(false);
+  });
 
   it('accepts a trip without notes', () => {
-    expect(TripInputSchema.safeParse(without(validTrip(), 'notes')).success).toBe(true)
-  })
-})
+    expect(TripInputSchema.safeParse(without(validTrip(), 'notes')).success).toBe(true);
+  });
+});
 
 describe('LuggageEntrySchema', () => {
   it('rejects a count of 0', () => {
-    expect(LuggageEntrySchema.safeParse({ type: 'checked', count: 0 }).success).toBe(false)
-  })
+    expect(LuggageEntrySchema.safeParse({ type: 'checked', count: 0 }).success).toBe(false);
+  });
 
   it('accepts a count of 1', () => {
-    expect(LuggageEntrySchema.safeParse({ type: 'checked', count: 1 }).success).toBe(true)
-  })
-})
+    expect(LuggageEntrySchema.safeParse({ type: 'checked', count: 1 }).success).toBe(true);
+  });
+});
 
 describe('WeatherSummarySchema', () => {
   it('parses a valid summary', () => {
-    expect(WeatherSummarySchema.safeParse(validWeather()).success).toBe(true)
-  })
+    expect(WeatherSummarySchema.safeParse(validWeather()).success).toBe(true);
+  });
 
   it.each([101, -1])('rejects a maxPrecipProbability of %s', (maxPrecipProbability) => {
     expect(WeatherSummarySchema.safeParse(validWeather({ maxPrecipProbability })).success).toBe(
       false,
-    )
-  })
+    );
+  });
 
   it('rejects a fractional rainDays', () => {
-    expect(WeatherSummarySchema.safeParse(validWeather({ rainDays: 1.5 })).success).toBe(false)
-  })
+    expect(WeatherSummarySchema.safeParse(validWeather({ rainDays: 1.5 })).success).toBe(false);
+  });
 
   it('rejects a negative rainDays', () => {
-    expect(WeatherSummarySchema.safeParse(validWeather({ rainDays: -1 })).success).toBe(false)
-  })
+    expect(WeatherSummarySchema.safeParse(validWeather({ rainDays: -1 })).success).toBe(false);
+  });
 
   it('rejects an unknown source', () => {
-    expect(WeatherSummarySchema.safeParse(validWeather({ source: 'guess' })).success).toBe(false)
-  })
+    expect(WeatherSummarySchema.safeParse(validWeather({ source: 'guess' })).success).toBe(false);
+  });
 
   it.each([0, 100])('accepts a maxPrecipProbability of %s', (maxPrecipProbability) => {
     expect(WeatherSummarySchema.safeParse(validWeather({ maxPrecipProbability })).success).toBe(
       true,
-    )
-  })
+    );
+  });
 
   it('rejects a summary missing isSeasonalEstimate', () => {
-    const weather = without(validWeather(), 'isSeasonalEstimate')
-    expect(WeatherSummarySchema.safeParse(weather).success).toBe(false)
-  })
-})
+    const weather = without(validWeather(), 'isSeasonalEstimate');
+    expect(WeatherSummarySchema.safeParse(weather).success).toBe(false);
+  });
+});
 
 describe('PackingItemDraftSchema', () => {
   it.each([
@@ -278,77 +279,77 @@ describe('PackingItemDraftSchema', () => {
     ['source', { source: 'magic' }],
     ['title', { title: '' }],
   ])('rejects an invalid %s', (_field, overrides) => {
-    expect(PackingItemDraftSchema.safeParse(validDraft(overrides)).success).toBe(false)
-  })
+    expect(PackingItemDraftSchema.safeParse(validDraft(overrides)).success).toBe(false);
+  });
 
   it('rejects a quantity of 0', () => {
-    expect(PackingItemDraftSchema.safeParse(validDraft({ quantity: 0 })).success).toBe(false)
-  })
+    expect(PackingItemDraftSchema.safeParse(validDraft({ quantity: 0 })).success).toBe(false);
+  });
 
   it('rejects a fractional quantity', () => {
-    expect(PackingItemDraftSchema.safeParse(validDraft({ quantity: 1.5 })).success).toBe(false)
-  })
+    expect(PackingItemDraftSchema.safeParse(validDraft({ quantity: 1.5 })).success).toBe(false);
+  });
 
   it.each(CATEGORIES)('accepts the category %s', (category) => {
-    expect(PackingItemDraftSchema.safeParse(validDraft({ category })).success).toBe(true)
-  })
+    expect(PackingItemDraftSchema.safeParse(validDraft({ category })).success).toBe(true);
+  });
 
   it.each([null, 'Visa required'])('accepts a reason of %s', (reason) => {
-    expect(PackingItemDraftSchema.safeParse(validDraft({ reason })).success).toBe(true)
-  })
+    expect(PackingItemDraftSchema.safeParse(validDraft({ reason })).success).toBe(true);
+  });
 
   it('rejects an empty-string key', () => {
-    expect(PackingItemDraftSchema.safeParse(validDraft({ key: '' })).success).toBe(false)
-  })
+    expect(PackingItemDraftSchema.safeParse(validDraft({ key: '' })).success).toBe(false);
+  });
 
   it('parses a draft with null key and null memberId', () => {
-    const draft = validDraft({ key: null, memberId: null })
-    expect(PackingItemDraftSchema.safeParse(draft).success).toBe(true)
-  })
-})
+    const draft = validDraft({ key: null, memberId: null });
+    expect(PackingItemDraftSchema.safeParse(draft).success).toBe(true);
+  });
+});
 
 describe('PackingItemSchema', () => {
   it('parses a full item', () => {
-    expect(PackingItemSchema.safeParse(validItem()).success).toBe(true)
-  })
+    expect(PackingItemSchema.safeParse(validItem()).success).toBe(true);
+  });
 
   it.each(['id', 'tripId', 'isPacked'])('rejects an item missing %s', (field) => {
-    expect(PackingItemSchema.safeParse(without(validItem(), field)).success).toBe(false)
-  })
-})
+    expect(PackingItemSchema.safeParse(without(validItem(), field)).success).toBe(false);
+  });
+});
 
 describe('TripInputSchema country', () => {
   it('parses with a country', () => {
-    expect(TripInputSchema.safeParse(validTrip({ country: 'Portugal' })).success).toBe(true)
-  })
+    expect(TripInputSchema.safeParse(validTrip({ country: 'Portugal' })).success).toBe(true);
+  });
 
   it('parses without a country', () => {
-    expect(TripInputSchema.safeParse(validTrip()).success).toBe(true)
-  })
-})
+    expect(TripInputSchema.safeParse(validTrip()).success).toBe(true);
+  });
+});
 
 describe('AiSuggestionSchema', () => {
   it('parses a valid suggestion', () => {
-    expect(AiSuggestionSchema.safeParse(validSuggestion()).success).toBe(true)
-  })
+    expect(AiSuggestionSchema.safeParse(validSuggestion()).success).toBe(true);
+  });
 
   it('defaults quantity to 1', () => {
-    const result = AiSuggestionSchema.safeParse(without(validSuggestion(), 'quantity'))
-    expect(result.success && result.data.quantity).toBe(1)
-  })
+    const result = AiSuggestionSchema.safeParse(without(validSuggestion(), 'quantity'));
+    expect(result.success && result.data.quantity).toBe(1);
+  });
 
   it('trims the title', () => {
-    const result = AiSuggestionSchema.safeParse(validSuggestion({ title: '  Plug adapter  ' }))
-    expect(result.success && result.data.title).toBe('Plug adapter')
-  })
+    const result = AiSuggestionSchema.safeParse(validSuggestion({ title: '  Plug adapter  ' }));
+    expect(result.success && result.data.title).toBe('Plug adapter');
+  });
 
   it('accepts a null reason', () => {
-    expect(AiSuggestionSchema.safeParse(validSuggestion({ reason: null })).success).toBe(true)
-  })
+    expect(AiSuggestionSchema.safeParse(validSuggestion({ reason: null })).success).toBe(true);
+  });
 
   it.each(AI_SCOPES)('accepts scope %s', (scope) => {
-    expect(AiSuggestionSchema.safeParse(validSuggestion({ scope })).success).toBe(true)
-  })
+    expect(AiSuggestionSchema.safeParse(validSuggestion({ scope })).success).toBe(true);
+  });
 
   it.each([
     ['whitespace-only title', { title: '   ' }],
@@ -360,9 +361,9 @@ describe('AiSuggestionSchema', () => {
     ['unknown scope', { scope: 'pets' }],
     ['unknown category', { category: 'garden' }],
   ])('rejects %s', (_name, overrides) => {
-    expect(AiSuggestionSchema.safeParse(validSuggestion(overrides)).success).toBe(false)
-  })
-})
+    expect(AiSuggestionSchema.safeParse(validSuggestion(overrides)).success).toBe(false);
+  });
+});
 
 describe('SuggestRequestSchema', () => {
   const validRequest = (overrides: Record<string, unknown> = {}) => ({
@@ -370,28 +371,32 @@ describe('SuggestRequestSchema', () => {
     weather: validWeather(),
     existingTitles: ['Passport'],
     ...overrides,
-  })
+  });
 
   it('parses a valid request', () => {
-    expect(SuggestRequestSchema.safeParse(validRequest()).success).toBe(true)
-  })
+    expect(SuggestRequestSchema.safeParse(validRequest()).success).toBe(true);
+  });
 
   it('accepts null weather', () => {
-    expect(SuggestRequestSchema.safeParse(validRequest({ weather: null })).success).toBe(true)
-  })
+    expect(SuggestRequestSchema.safeParse(validRequest({ weather: null })).success).toBe(true);
+  });
 
   it('accepts 150 existing titles but rejects 151', () => {
-    const titles = (n: number) => Array.from({ length: n }, (_, i) => `Item ${i}`)
-    expect(SuggestRequestSchema.safeParse(validRequest({ existingTitles: titles(150) })).success).toBe(true)
-    expect(SuggestRequestSchema.safeParse(validRequest({ existingTitles: titles(151) })).success).toBe(false)
-  })
+    const titles = (n: number) => Array.from({ length: n }, (_, i) => `Item ${i}`);
+    expect(
+      SuggestRequestSchema.safeParse(validRequest({ existingTitles: titles(150) })).success,
+    ).toBe(true);
+    expect(
+      SuggestRequestSchema.safeParse(validRequest({ existingTitles: titles(151) })).success,
+    ).toBe(false);
+  });
 
   it('rejects an invalid nested trip', () => {
-    const trip = validTrip({ startDate: '2026-06-07', endDate: '2026-06-01' })
-    expect(SuggestRequestSchema.safeParse(validRequest({ trip })).success).toBe(false)
-  })
+    const trip = validTrip({ startDate: '2026-06-07', endDate: '2026-06-01' });
+    expect(SuggestRequestSchema.safeParse(validRequest({ trip })).success).toBe(false);
+  });
 
   it('rejects a missing existingTitles', () => {
-    expect(SuggestRequestSchema.safeParse(without(validRequest(), 'existingTitles')).success).toBe(false)
-  })
-})
+    expect(SuggestRequestSchema.safeParse(without(validRequest(), 'existingTitles')).success).toBe(false);
+  });
+});

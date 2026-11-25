@@ -11,6 +11,7 @@ PackSmart is a packing-list app: a Vite + React 19 + TypeScript SPA styled with 
 
 # Code Style
 - Use 2-space indentation
+- Semicolons, single quotes, trailing commas in multiline; enforced by `npm run lint` (`npm run lint:fix` applies them)
 - Prefer named exports
 - Keep the packing engine in `src/engine/` as pure logic, with no React or network imports
 - Validate external data (Open-Meteo, Gemini, Supabase rows) with Zod

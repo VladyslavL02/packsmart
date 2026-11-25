@@ -18,6 +18,9 @@ case "$rel" in
   *) exit 0 ;;
 esac
 
+# Apply the project code style (semicolons, quotes, ...) to the edited file.
+npx eslint --fix "$rel" >/dev/null 2>&1
+
 out=$(npm run --silent typecheck 2>&1)
 if [ $? -ne 0 ]; then
   echo "Typecheck failed after editing $rel:" >&2

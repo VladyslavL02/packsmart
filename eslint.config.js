@@ -1,18 +1,19 @@
-import js from '@eslint/js'
-import globals from 'globals'
-import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
-import tseslint from 'typescript-eslint'
-import { defineConfig, globalIgnores } from 'eslint/config'
+import js from '@eslint/js';
+import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
+import reactRefresh from 'eslint-plugin-react-refresh';
+import tseslint from 'typescript-eslint';
+import stylistic from '@stylistic/eslint-plugin';
+import { defineConfig, globalIgnores } from 'eslint/config';
 
 // Project conventions from CLAUDE.md, enforced mechanically so the
 // code-reviewer agent only has to check what needs judgment.
-const RAW_PALETTE = '/\\b(zinc|emerald|violet)-\\d/'
-const HEX_COLOR = '/#[0-9a-fA-F]{3,8}\\b/'
+const RAW_PALETTE = '/\\b(zinc|emerald|violet)-\\d/';
+const HEX_COLOR = '/#[0-9a-fA-F]{3,8}\\b/';
 
 const iconImportPatterns = [
   { group: ['material-symbols*', '@material-symbols/*'], message: 'Use Lucide icons (lucide-react).' },
-]
+];
 
 export default defineConfig([
   globalIgnores(['dist']),
@@ -26,6 +27,35 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: globals.browser,
+    },
+  },
+  {
+    // Mate-style formatting: semicolons, single quotes, trailing commas.
+    files: ['**/*.{ts,tsx,js}'],
+    plugins: { '@stylistic': stylistic },
+    rules: {
+      '@stylistic/semi': ['error', 'always'],
+      '@stylistic/quotes': ['error', 'single', { avoidEscape: true }],
+      '@stylistic/indent': ['error', 2],
+      '@stylistic/jsx-indent-props': ['error', 2],
+      '@stylistic/comma-dangle': ['error', 'always-multiline'],
+      '@stylistic/max-len': ['error', {
+        code: 100,
+        ignoreUrls: true,
+        ignoreStrings: true,
+        ignoreTemplateLiterals: true,
+        ignoreComments: true,
+      }],
+      '@stylistic/padding-line-between-statements': [
+        'error',
+        { blankLine: 'always', prev: '*', next: 'return' },
+      ],
+      '@stylistic/member-delimiter-style': ['error', {
+        multiline: { delimiter: 'semi', requireLast: true },
+        singleline: { delimiter: 'semi', requireLast: false },
+      }],
+      curly: ['error', 'all'],
+      'prefer-const': 'error',
     },
   },
   {
@@ -67,4 +97,4 @@ export default defineConfig([
       ],
     },
   },
-])
+]);
