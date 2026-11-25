@@ -140,6 +140,10 @@ const needsSunProtection = (ctx: RuleContext) => ctx.flags.heat || ctx.input.tri
 const sunReason = (ctx: RuleContext) =>
   ctx.flags.heat ? heatReason(ctx) : 'Sun exposure on a beach trip'
 
+// Mountain trips get cold hands and ears well above freezing, especially in rain.
+const needsHandsAndHead = (ctx: RuleContext) =>
+  ctx.flags.freezing || (ctx.flags.cold && ctx.input.tripType === 'mountains')
+
 const onlyWithBags = (ctx: RuleContext) =>
   hasLuggage(ctx, 'checked') && (hasLuggage(ctx, 'carryOn') || hasLuggage(ctx, 'personal'))
 
@@ -244,7 +248,7 @@ export const WEATHER_RULES: Rule[] = [
     title: 'Gloves',
     category: 'clothing',
     appliesTo: 'everyone',
-    when: (ctx) => ctx.flags.freezing,
+    when: needsHandsAndHead,
     reason: freezingReason,
   },
   {
@@ -252,7 +256,7 @@ export const WEATHER_RULES: Rule[] = [
     title: 'Warm hat',
     category: 'clothing',
     appliesTo: 'everyone',
-    when: (ctx) => ctx.flags.freezing,
+    when: needsHandsAndHead,
     reason: freezingReason,
   },
   {
@@ -307,7 +311,14 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
     { key: 'headlamp', title: 'Headlamp', category: 'electronics', appliesTo: 'shared' },
   ],
   beach: [
-    { key: 'swimwear', title: 'Swimwear', category: 'clothing', appliesTo: 'everyone' },
+    {
+      key: 'swimwear',
+      title: 'Swimwear',
+      category: 'clothing',
+      appliesTo: 'everyone',
+      // A spare so one suit can dry while the other is worn.
+      quantity: (ctx) => (ctx.days >= 3 ? 2 : 1),
+    },
     { key: 'beach-towel', title: 'Beach towel', category: 'misc', appliesTo: 'everyone' },
     { key: 'flip-flops', title: 'Flip-flops', category: 'clothing', appliesTo: 'everyone' },
     { key: 'after-sun', title: 'After-sun lotion', category: 'toiletries', appliesTo: 'shared' },
