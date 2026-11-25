@@ -588,8 +588,22 @@ describe('TRIP_TYPE_RULES', () => {
   const EXPECTED: Record<string, string[]> = {
     city: ['walking-shoes', 'day-bag'],
     mountains: ['hiking-boots', 'fleece', 'water-bottle', 'headlamp'],
-    beach: ['swimwear', 'beach-towel', 'flip-flops', 'after-sun'],
-    business: ['formal-outfit', 'laptop', 'laptop-charger', 'dress-shoes'],
+    beach: [
+      'swimwear',
+      'beach-towel',
+      'flip-flops',
+      'after-sun',
+      'insect-repellent',
+      'beach-bag',
+    ],
+    business: [
+      'formal-outfit',
+      'laptop',
+      'laptop-charger',
+      'dress-shoes',
+      'casual-shoes',
+      'laptop-bag',
+    ],
   }
 
   it.each(Object.entries(EXPECTED))('%s has exactly the expected rule keys', (type, keys) => {
@@ -628,7 +642,7 @@ describe('BASE_RULES', () => {
     'sleepwear',
     'medications',
   ]
-  const SHARED = ['phone-charger', 'power-bank', 'toothpaste', 'first-aid-kit', 'laundry-kit']
+  const SHARED = ['power-bank', 'toothpaste', 'first-aid-kit', 'laundry-kit']
 
   it('contains every expected key', () => {
     expect(keysOf(BASE_RULES)).toEqual(expect.arrayContaining([...EVERYONE, ...SHARED]))
@@ -737,9 +751,11 @@ describe('reviewer fixes', () => {
   it.each([
     ['wallet-cards', 'adult', 'documents'],
     ['tickets-booking', 'shared', 'documents'],
-    ['deodorant', 'everyone', 'toiletries'],
+    ['deodorant', 'adult', 'toiletries'],
     ['shampoo-soap', 'shared', 'toiletries'],
-    ['razor-hairbrush', 'adult', 'toiletries'],
+    ['razor', 'adult', 'toiletries'],
+    ['hairbrush', 'everyone', 'toiletries'],
+    ['phone-charger', 'adult', 'electronics'],
   ])('base essential %s is %s / %s', (key, scope, category) => {
     const rule = findRule(BASE_RULES, key)
     expect(rule.appliesTo).toBe(scope)
@@ -771,5 +787,96 @@ describe('reviewer fixes', () => {
       const ctx = ctxFromTrip(trip({ tripType: 'beach' }), weather({ maxTemp: 31 }))
       expect(reasonOf(findRule(WEATHER_RULES, 'sunscreen'), ctx)).toContain('31')
     })
+  })
+})
+
+describe('second reviewer pass', () => {
+  const rainy = weather({ rainDays: 3, maxPrecipProbability: 80 })
+  const cold = weather({ minTemp: 4, maxTemp: 12 })
+  const freezing = weather({ minTemp: -3, maxTemp: 3 })
+
+  it('drops the sweater on cold mountain trips (the fleece covers it) but keeps it elsewhere', () => {
+    const sweater = findRule(WEATHER_RULES, 'sweater')
+    expect(appliesIn(sweater, ctxFromTrip(trip({ tripType: 'mountains' }), cold))).toBe(false)
+    expect(appliesIn(sweater, ctxFromTrip(trip({ tripType: 'city' }), cold))).toBe(true)
+  })
+
+  it('packs rain trousers only for rain on a mountain trip', () => {
+    const pants = findRule(WEATHER_RULES, 'rain-pants')
+    expect(appliesIn(pants, ctxFromTrip(trip({ tripType: 'mountains' }), rainy))).toBe(true)
+    expect(appliesIn(pants, ctxFromTrip(trip({ tripType: 'city' }), rainy))).toBe(false)
+    expect(appliesIn(pants, ctxFromTrip(trip({ tripType: 'mountains' }), weather()))).toBe(false)
+  })
+
+  it.each([
+    [12, true],
+    [15, true],
+    [16, false],
+    [8, false],
+  ])('light jacket at minTemp %s applies: %s', (minTemp, expected) => {
+    const rule = findRule(WEATHER_RULES, 'light-jacket')
+    expect(appliesIn(rule, ctxFromTrip(trip(), weather({ minTemp })))).toBe(expected)
+  })
+
+  it('does not pack a light jacket without weather', () => {
+    expect(appliesIn(findRule(WEATHER_RULES, 'light-jacket'), ctxFromTrip(trip(), null))).toBe(
+      false,
+    )
+  })
+
+  it.each(['scarf', 'warm-socks'])('%s applies only when freezing', (key) => {
+    const rule = findRule(WEATHER_RULES, key)
+    expect(appliesIn(rule, ctxFromTrip(trip(), freezing))).toBe(true)
+    expect(appliesIn(rule, ctxFromTrip(trip(), cold))).toBe(false)
+  })
+
+  it('lip balm applies when cold, as one shared item', () => {
+    const rule = findRule(WEATHER_RULES, 'lip-balm')
+    expect(rule.appliesTo).toBe('shared')
+    expect(appliesIn(rule, ctxFromTrip(trip(), cold))).toBe(true)
+    expect(appliesIn(rule, ctxFromTrip(trip(), weather()))).toBe(false)
+  })
+
+  it('warm socks are capped at 3 pairs', () => {
+    const rule = findRule(WEATHER_RULES, 'warm-socks')
+    expect(quantityOf(rule, directCtx(2, 'standard'))).toBe(2)
+    expect(quantityOf(rule, directCtx(10, 'standard'))).toBe(3)
+  })
+
+  it.each([
+    [1, 1],
+    [7, 1],
+    [8, 2],
+    [14, 2],
+    [15, 3],
+  ])('sunscreen for a %s-day trip is %s bottle(s)', (days, expected) => {
+    expect(quantityOf(findRule(WEATHER_RULES, 'sunscreen'), directCtx(days, 'standard'))).toBe(
+      expected,
+    )
+  })
+
+  it.each(['sunscreen', 'sunglasses', 'sun-cap'])(
+    '%s applies on a mild mountain trip, citing altitude',
+    (key) => {
+      const ctx = ctxFromTrip(trip({ tripType: 'mountains' }), weather({ maxTemp: 15 }))
+      const rule = findRule(WEATHER_RULES, key)
+      expect(appliesIn(rule, ctx)).toBe(true)
+      expect(reasonOf(rule, ctx)).toContain('altitude')
+    },
+  )
+
+  it('business trips pack half as many t-shirts and one casual bottom', () => {
+    const business = (days: number) =>
+      directCtx(days, 'standard', { input: trip({ tripType: 'business' }) })
+    expect(quantityOf(findRule(BASE_RULES, 't-shirts'), business(4))).toBe(2)
+    expect(quantityOf(findRule(BASE_RULES, 't-shirts'), business(5))).toBe(3)
+    expect(quantityOf(findRule(BASE_RULES, 'bottoms'), business(10))).toBe(1)
+  })
+
+  it('city walking shoes mention a waterproof pair when wet or cold, not when dry and mild', () => {
+    const shoes = findRule(TRIP_TYPE_RULES.city, 'walking-shoes')
+    expect(reasonOf(shoes, ctxFromTrip(trip(), rainy))).toContain('waterproof')
+    expect(reasonOf(shoes, ctxFromTrip(trip(), cold))).toContain('waterproof')
+    expect(reasonOf(shoes, ctxFromTrip(trip(), weather()))).not.toContain('waterproof')
   })
 })

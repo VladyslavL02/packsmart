@@ -27,6 +27,7 @@ export type Rule = {
 // --- Weather thresholds -------------------------------------------------
 
 export const RAIN_PROB_THRESHOLD = 50
+export const LIGHT_LAYER_MAX = 15
 export const COLD_MAX = 8
 export const FREEZING_MAX = 0
 export const HEAT_MIN = 27
@@ -135,10 +136,16 @@ const freezingReason = (ctx: RuleContext) =>
 const heatReason = (ctx: RuleContext) =>
   withSeasonalNote(ctx, `Highs up to ${degrees(ctx.weather?.maxTemp ?? 0)}`)
 
-// A beach trip needs sun gear even when the forecast stays below the heat threshold.
-const needsSunProtection = (ctx: RuleContext) => ctx.flags.heat || ctx.input.tripType === 'beach'
+// Beach and mountain trips need sun gear even when the forecast stays below the heat threshold
+// (water reflects the sun, and UV is stronger at altitude).
+const needsSunProtection = (ctx: RuleContext) =>
+  ctx.flags.heat || ctx.input.tripType === 'beach' || ctx.input.tripType === 'mountains'
 const sunReason = (ctx: RuleContext) =>
-  ctx.flags.heat ? heatReason(ctx) : 'Sun exposure on a beach trip'
+  ctx.flags.heat
+    ? heatReason(ctx)
+    : ctx.input.tripType === 'mountains'
+      ? 'Stronger sun at altitude'
+      : 'Sun exposure on a beach trip'
 
 // Mountain trips get cold hands and ears well above freezing, especially in rain.
 const needsHandsAndHead = (ctx: RuleContext) =>
@@ -158,13 +165,14 @@ export const BASE_RULES: Rule[] = [
     category: 'documents',
     appliesTo: 'shared',
   },
-  { key: 'phone-charger', title: 'Phone charger', category: 'electronics', appliesTo: 'shared' },
+  { key: 'phone-charger', title: 'Phone charger', category: 'electronics', appliesTo: 'adult' },
   { key: 'power-bank', title: 'Power bank', category: 'electronics', appliesTo: 'shared' },
   { key: 'toothbrush', title: 'Toothbrush', category: 'toiletries', appliesTo: 'everyone' },
   { key: 'toothpaste', title: 'Toothpaste', category: 'toiletries', appliesTo: 'shared' },
-  { key: 'deodorant', title: 'Deodorant', category: 'toiletries', appliesTo: 'everyone' },
+  { key: 'deodorant', title: 'Deodorant', category: 'toiletries', appliesTo: 'adult' },
   { key: 'shampoo-soap', title: 'Shampoo & soap', category: 'toiletries', appliesTo: 'shared' },
-  { key: 'razor-hairbrush', title: 'Razor & hairbrush', category: 'toiletries', appliesTo: 'adult' },
+  { key: 'razor', title: 'Razor', category: 'toiletries', appliesTo: 'adult' },
+  { key: 'hairbrush', title: 'Hairbrush', category: 'toiletries', appliesTo: 'everyone' },
   {
     key: 'underwear',
     title: 'Underwear',
@@ -184,7 +192,12 @@ export const BASE_RULES: Rule[] = [
     title: 'T-shirts',
     category: 'clothing',
     appliesTo: 'everyone',
-    quantity: (ctx) => Math.min(ctx.days, CLOTHING_CAPS[ctx.packingCapacity].tshirts),
+    // Business trips mostly wear formal outfits, so casual tops are halved.
+    quantity: (ctx) =>
+      Math.min(
+        ctx.input.tripType === 'business' ? Math.ceil(ctx.days / 2) : ctx.days,
+        CLOTHING_CAPS[ctx.packingCapacity].tshirts,
+      ),
   },
   {
     key: 'bottoms',
@@ -192,7 +205,9 @@ export const BASE_RULES: Rule[] = [
     category: 'clothing',
     appliesTo: 'everyone',
     // Bottoms can be worn several times: one per ~3 days plus one, never more than 4.
-    quantity: (ctx) => Math.min(Math.ceil(ctx.days / 3) + 1, 4),
+    // On business trips the formal outfits cover most days, so one casual pair is enough.
+    quantity: (ctx) =>
+      ctx.input.tripType === 'business' ? 1 : Math.min(Math.ceil(ctx.days / 3) + 1, 4),
   },
   { key: 'sleepwear', title: 'Sleepwear', category: 'clothing', appliesTo: 'everyone' },
   { key: 'medications', title: 'Medications', category: 'health', appliesTo: 'everyone' },
@@ -240,6 +255,50 @@ export const WEATHER_RULES: Rule[] = [
     title: 'Sweater',
     category: 'clothing',
     appliesTo: 'everyone',
+    // The mountain fleece already covers this layer.
+    when: (ctx) => ctx.flags.cold && ctx.input.tripType !== 'mountains',
+    reason: coldReason,
+  },
+  {
+    key: 'rain-pants',
+    title: 'Rain trousers',
+    category: 'clothing',
+    appliesTo: 'everyone',
+    when: (ctx) => ctx.flags.rain && ctx.input.tripType === 'mountains',
+    reason: rainReason,
+  },
+  {
+    key: 'light-jacket',
+    title: 'Light jacket',
+    category: 'clothing',
+    appliesTo: 'everyone',
+    // Cool but not cold enough for the warm jacket.
+    when: (ctx) => ctx.weather !== null && !ctx.flags.cold && ctx.weather.minTemp <= LIGHT_LAYER_MAX,
+    reason: (ctx) =>
+      withSeasonalNote(ctx, `Lows around ${degrees(ctx.weather?.minTemp ?? 0)}`),
+  },
+  {
+    key: 'scarf',
+    title: 'Scarf',
+    category: 'clothing',
+    appliesTo: 'everyone',
+    when: (ctx) => ctx.flags.freezing,
+    reason: freezingReason,
+  },
+  {
+    key: 'warm-socks',
+    title: 'Warm socks',
+    category: 'clothing',
+    appliesTo: 'everyone',
+    quantity: (ctx) => Math.min(ctx.days, 3),
+    when: (ctx) => ctx.flags.freezing,
+    reason: freezingReason,
+  },
+  {
+    key: 'lip-balm',
+    title: 'Lip balm',
+    category: 'toiletries',
+    appliesTo: 'shared',
     when: (ctx) => ctx.flags.cold,
     reason: coldReason,
   },
@@ -272,6 +331,8 @@ export const WEATHER_RULES: Rule[] = [
     title: 'Sunscreen',
     category: 'toiletries',
     appliesTo: 'shared',
+    // One bottle lasts about a week of daily use.
+    quantity: (ctx) => Math.max(1, Math.ceil(ctx.days / 7)),
     when: needsSunProtection,
     reason: sunReason,
   },
@@ -300,7 +361,10 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
       title: 'Comfortable walking shoes',
       category: 'clothing',
       appliesTo: 'everyone',
-      reason: 'City trips mean a lot of walking',
+      reason: (ctx) =>
+        ctx.flags.rain || ctx.flags.cold
+          ? 'City trips mean a lot of walking: bring a waterproof pair'
+          : 'City trips mean a lot of walking',
     },
     { key: 'day-bag', title: 'Day bag', category: 'misc', appliesTo: 'everyone' },
   ],
@@ -322,6 +386,13 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
     { key: 'beach-towel', title: 'Beach towel', category: 'misc', appliesTo: 'everyone' },
     { key: 'flip-flops', title: 'Flip-flops', category: 'clothing', appliesTo: 'everyone' },
     { key: 'after-sun', title: 'After-sun lotion', category: 'toiletries', appliesTo: 'shared' },
+    {
+      key: 'insect-repellent',
+      title: 'Insect repellent',
+      category: 'toiletries',
+      appliesTo: 'shared',
+    },
+    { key: 'beach-bag', title: 'Beach bag', category: 'misc', appliesTo: 'shared' },
   ],
   business: [
     {
@@ -335,6 +406,8 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
     { key: 'laptop', title: 'Laptop', category: 'electronics', appliesTo: 'adult' },
     { key: 'laptop-charger', title: 'Laptop charger', category: 'electronics', appliesTo: 'adult' },
     { key: 'dress-shoes', title: 'Dress shoes', category: 'clothing', appliesTo: 'adult' },
+    { key: 'casual-shoes', title: 'Casual shoes', category: 'clothing', appliesTo: 'adult' },
+    { key: 'laptop-bag', title: 'Laptop bag', category: 'misc', appliesTo: 'adult' },
   ],
 }
 

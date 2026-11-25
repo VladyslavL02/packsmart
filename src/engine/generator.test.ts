@@ -366,3 +366,18 @@ describe('sortItems and edge cases', () => {
     expect(items.every((item) => item.memberId === null)).toBe(true)
   })
 })
+
+describe('dedupe identity', () => {
+  it('keeps items with different keys apart even when their titles match', () => {
+    const result = dedupeItems([
+      draft({ key: 'rain-jacket', title: 'Jacket' }),
+      draft({ key: 'warm-jacket', title: 'Jacket' }),
+    ])
+    expect(result).toHaveLength(2)
+  })
+
+  it('gives each adult a phone charger but not the child', () => {
+    const items = generateBasePackingList(trip({ members: members(2, 1) }), weather())
+    expect(rowsFor(items, 'phone-charger').map((r) => r.memberId)).toEqual(['a1', 'a2'])
+  })
+})
