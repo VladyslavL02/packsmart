@@ -174,6 +174,39 @@ describe('generateBasePackingList', () => {
         for (const row of rows) expect(row.reason).toContain('seasonal estimate')
       }
     })
+
+    it('adds seasonal estimate reasons to cold items', () => {
+      const cold = generateBasePackingList(
+        trip(),
+        weather({ minTemp: 2, maxTemp: 12, isSeasonalEstimate: true, source: 'seasonal' }),
+      )
+      for (const key of ['warm-jacket', 'sweater']) {
+        const rows = rowsFor(cold, key)
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) expect(row.reason).toContain('seasonal estimate')
+      }
+    })
+
+    it('adds seasonal estimate reasons to heat items', () => {
+      const hot = generateBasePackingList(
+        trip(),
+        weather({ minTemp: 22, maxTemp: 30, isSeasonalEstimate: true, source: 'seasonal' }),
+      )
+      for (const key of ['sunscreen', 'sunglasses']) {
+        const rows = rowsFor(hot, key)
+        expect(rows.length).toBeGreaterThan(0)
+        for (const row of rows) expect(row.reason).toContain('seasonal estimate')
+      }
+    })
+
+    it('has no seasonal estimate reason when weather is not a seasonal estimate', () => {
+      const rows = generateBasePackingList(
+        trip(),
+        weather({ rainDays: 2, maxPrecipProbability: 70, isSeasonalEstimate: false }),
+      )
+      expect(rows.length).toBeGreaterThan(0)
+      for (const row of rows) expect(row.reason ?? '').not.toContain('seasonal estimate')
+    })
   })
 
   describe('headcount', () => {
