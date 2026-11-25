@@ -12,6 +12,8 @@ export const CATEGORIES = [
   'kids',
   'misc',
 ] as const
+// 'everyone' is expanded per member by mergeItems; the DB scope stays shared | adult | child.
+export const AI_SCOPES = ['shared', 'everyone', 'adult', 'child'] as const
 
 export const TripTypeSchema = z.enum(TRIP_TYPES)
 export const LuggageTypeSchema = z.enum(LUGGAGE)
@@ -32,6 +34,8 @@ export const LuggageEntrySchema = z.object({
 export const TripInputSchema = z
   .object({
     city: z.string().min(1),
+    // Filled from the picked city (no form field); saved to trips.country.
+    country: z.string().optional(),
     latitude: z.number().min(-90).max(90),
     longitude: z.number().min(-180).max(180),
     // z.iso.date() rejects impossible dates like 2026-02-31, which Date.UTC would roll over.
@@ -61,6 +65,23 @@ export const WeatherSummarySchema = z.object({
   source: z.enum(['forecast', 'seasonal']),
 })
 
+export const AiScopeSchema = z.enum(AI_SCOPES)
+
+// What /api/suggest returns, before mergeItems expands it per member.
+export const AiSuggestionSchema = z.object({
+  title: z.string().trim().min(1).max(60),
+  category: CategorySchema,
+  scope: AiScopeSchema,
+  quantity: z.number().int().min(1).max(10).default(1),
+  reason: z.string().max(140).nullable(),
+})
+
+export const SuggestRequestSchema = z.object({
+  trip: TripInputSchema,
+  weather: WeatherSummarySchema.nullable(),
+  existingTitles: z.array(z.string()).max(150),
+})
+
 export const PackingItemDraftSchema = z.object({
   key: z.string().min(1).nullable(),
   title: z.string().min(1),
@@ -86,5 +107,8 @@ export type Member = z.infer<typeof MemberSchema>
 export type LuggageEntry = z.infer<typeof LuggageEntrySchema>
 export type TripInput = z.infer<typeof TripInputSchema>
 export type WeatherSummary = z.infer<typeof WeatherSummarySchema>
+export type AiScope = z.infer<typeof AiScopeSchema>
+export type AiSuggestion = z.infer<typeof AiSuggestionSchema>
+export type SuggestRequest = z.infer<typeof SuggestRequestSchema>
 export type PackingItemDraft = z.infer<typeof PackingItemDraftSchema>
 export type PackingItem = z.infer<typeof PackingItemSchema>

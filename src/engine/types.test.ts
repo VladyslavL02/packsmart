@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AI_SCOPES,
+  AiSuggestionSchema,
   CATEGORIES,
   LUGGAGE,
   LuggageEntrySchema,
   PackingItemDraftSchema,
   PackingItemSchema,
+  SuggestRequestSchema,
   TRIP_TYPES,
   TripInputSchema,
   WeatherSummarySchema,
@@ -41,6 +44,15 @@ const validDraft = (overrides: Record<string, unknown> = {}) => ({
   quantity: 1,
   source: 'rules',
   reason: null,
+  ...overrides,
+})
+
+const validSuggestion = (overrides: Record<string, unknown> = {}) => ({
+  title: 'Plug adapter type G',
+  category: 'electronics',
+  scope: 'shared',
+  quantity: 2,
+  reason: 'UK sockets differ from EU ones',
   ...overrides,
 })
 
@@ -302,5 +314,84 @@ describe('PackingItemSchema', () => {
 
   it.each(['id', 'tripId', 'isPacked'])('rejects an item missing %s', (field) => {
     expect(PackingItemSchema.safeParse(without(validItem(), field)).success).toBe(false)
+  })
+})
+
+describe('TripInputSchema country', () => {
+  it('parses with a country', () => {
+    expect(TripInputSchema.safeParse(validTrip({ country: 'Portugal' })).success).toBe(true)
+  })
+
+  it('parses without a country', () => {
+    expect(TripInputSchema.safeParse(validTrip()).success).toBe(true)
+  })
+})
+
+describe('AiSuggestionSchema', () => {
+  it('parses a valid suggestion', () => {
+    expect(AiSuggestionSchema.safeParse(validSuggestion()).success).toBe(true)
+  })
+
+  it('defaults quantity to 1', () => {
+    const result = AiSuggestionSchema.safeParse(without(validSuggestion(), 'quantity'))
+    expect(result.success && result.data.quantity).toBe(1)
+  })
+
+  it('trims the title', () => {
+    const result = AiSuggestionSchema.safeParse(validSuggestion({ title: '  Plug adapter  ' }))
+    expect(result.success && result.data.title).toBe('Plug adapter')
+  })
+
+  it('accepts a null reason', () => {
+    expect(AiSuggestionSchema.safeParse(validSuggestion({ reason: null })).success).toBe(true)
+  })
+
+  it.each(AI_SCOPES)('accepts scope %s', (scope) => {
+    expect(AiSuggestionSchema.safeParse(validSuggestion({ scope })).success).toBe(true)
+  })
+
+  it.each([
+    ['whitespace-only title', { title: '   ' }],
+    ['61-char title', { title: 'a'.repeat(61) }],
+    ['quantity 0', { quantity: 0 }],
+    ['quantity 11', { quantity: 11 }],
+    ['fractional quantity', { quantity: 1.5 }],
+    ['141-char reason', { reason: 'a'.repeat(141) }],
+    ['unknown scope', { scope: 'pets' }],
+    ['unknown category', { category: 'garden' }],
+  ])('rejects %s', (_name, overrides) => {
+    expect(AiSuggestionSchema.safeParse(validSuggestion(overrides)).success).toBe(false)
+  })
+})
+
+describe('SuggestRequestSchema', () => {
+  const validRequest = (overrides: Record<string, unknown> = {}) => ({
+    trip: validTrip(),
+    weather: validWeather(),
+    existingTitles: ['Passport'],
+    ...overrides,
+  })
+
+  it('parses a valid request', () => {
+    expect(SuggestRequestSchema.safeParse(validRequest()).success).toBe(true)
+  })
+
+  it('accepts null weather', () => {
+    expect(SuggestRequestSchema.safeParse(validRequest({ weather: null })).success).toBe(true)
+  })
+
+  it('accepts 150 existing titles but rejects 151', () => {
+    const titles = (n: number) => Array.from({ length: n }, (_, i) => `Item ${i}`)
+    expect(SuggestRequestSchema.safeParse(validRequest({ existingTitles: titles(150) })).success).toBe(true)
+    expect(SuggestRequestSchema.safeParse(validRequest({ existingTitles: titles(151) })).success).toBe(false)
+  })
+
+  it('rejects an invalid nested trip', () => {
+    const trip = validTrip({ startDate: '2026-06-07', endDate: '2026-06-01' })
+    expect(SuggestRequestSchema.safeParse(validRequest({ trip })).success).toBe(false)
+  })
+
+  it('rejects a missing existingTitles', () => {
+    expect(SuggestRequestSchema.safeParse(without(validRequest(), 'existingTitles')).success).toBe(false)
   })
 })
