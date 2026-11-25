@@ -275,13 +275,13 @@ describe('clothing quantities', () => {
     light: 4,
     standard: 7,
     roomy: 10,
-    spacious: 14,
+    spacious: 10,
   }
   const TSHIRT_CAPS: Record<PackingCapacity, number> = {
     light: 3,
     standard: 5,
     roomy: 7,
-    spacious: 10,
+    spacious: 7,
   }
 
   it.each(['underwear', 'socks', 't-shirts'])('%s is an everyone clothing rule', (key) => {
@@ -378,7 +378,7 @@ describe('laundry-kit', () => {
     light: 4,
     standard: 7,
     roomy: 10,
-    spacious: 14,
+    spacious: 10,
   }
 
   it('is a shared misc rule', () => {
@@ -688,7 +688,7 @@ describe('CLOTHING_CAPS', () => {
       light: { underwear: 4, tshirts: 3, formal: 2 },
       standard: { underwear: 7, tshirts: 5, formal: 3 },
       roomy: { underwear: 10, tshirts: 7, formal: 5 },
-      spacious: { underwear: 14, tshirts: 10, formal: 7 },
+      spacious: { underwear: 10, tshirts: 7, formal: 7 },
     })
   })
 

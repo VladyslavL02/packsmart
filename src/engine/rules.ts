@@ -70,7 +70,7 @@ export const CLOTHING_CAPS: Record<
   light: { underwear: 4, tshirts: 3, formal: 2 },
   standard: { underwear: 7, tshirts: 5, formal: 3 },
   roomy: { underwear: 10, tshirts: 7, formal: 5 },
-  spacious: { underwear: 14, tshirts: 10, formal: 7 },
+  spacious: { underwear: 10, tshirts: 7, formal: 7 },
 }
 
 export function computePackingCapacity(input: TripInput): PackingCapacity {
@@ -140,7 +140,7 @@ const needsSunProtection = (ctx: RuleContext) => ctx.flags.heat || ctx.input.tri
 const sunReason = (ctx: RuleContext) =>
   ctx.flags.heat ? heatReason(ctx) : 'Sun exposure on a beach trip'
 
-const onlyWithBags =(ctx: RuleContext) =>
+const onlyWithBags = (ctx: RuleContext) =>
   hasLuggage(ctx, 'checked') && (hasLuggage(ctx, 'carryOn') || hasLuggage(ctx, 'personal'))
 
 // --- Rule groups --------------------------------------------------------
