@@ -362,6 +362,18 @@ describe('getAiSuggestions', () => {
     expect(warnedText()).not.toContain('client dinner');
   });
 
+  // fetch quotes the whole header value when it is invalid, e.g. a key pasted with a line break.
+  it('does not log the key when fetch rejects it as a header value', async () => {
+    const badKey = 'secret-part-one\nsecret-part-two';
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError(`Headers.append: "${badKey}" is an invalid header value.`);
+    }));
+
+    expect(await getAiSuggestions(req, badKey)).toEqual(UNAVAILABLE);
+    expect(warn).toHaveBeenCalledWith('[gemini] request failed', 'TypeError');
+    expect(warnedText()).not.toContain('secret-part');
+  });
+
   describe('retry', () => {
     afterEach(() => {
       vi.useRealTimers();

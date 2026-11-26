@@ -231,8 +231,8 @@ export async function getAiSuggestions(
     return { items, status: 'ok' };
   } catch (error) {
     if (signal?.aborted) {return unavailable();}
-    const e = error instanceof Error ? error : new Error('unknown');
-    console.warn('[gemini] request failed', e.name, e.message);
+    // Name only: a fetch error message can quote the x-goog-api-key header value.
+    console.warn('[gemini] request failed', error instanceof Error ? error.name : 'unknown');
 
     return unavailable();
   }
