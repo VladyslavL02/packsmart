@@ -15,14 +15,15 @@ export function FilterChip({ label, count, active, disabled, title, onClick }: F
       disabled={disabled}
       title={title}
       onClick={onClick}
-      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium tabular-nums
-        disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`flex max-w-full shrink-0 gap-1 rounded-full border px-3 py-1.5 text-xs font-medium
+        tabular-nums disabled:cursor-not-allowed disabled:opacity-50 ${
     active
       ? 'border-primary bg-primary-container/15 text-primary'
       : 'border-outline-variant bg-surface-container-low text-on-surface-variant'
     }`}
     >
-      {label} ({count})
+      <span className="truncate">{label}</span>
+      <span>({count})</span>
     </button>
   );
 }

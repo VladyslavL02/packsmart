@@ -21,8 +21,8 @@ export function TravelersEditor({ value, onChange }: TravelersEditorProps) {
           return (
             <div
               key={kind}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-base
-                bg-surface-container px-3 py-2"
+              className="flex flex-col items-start gap-2 rounded-base bg-surface-container px-3
+                py-2 sm:flex-row sm:items-center sm:justify-between"
             >
               <span className="text-sm font-medium">{label}</span>
               <Stepper

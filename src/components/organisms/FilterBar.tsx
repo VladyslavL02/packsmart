@@ -27,7 +27,7 @@ export function FilterBar({
 
   return (
     <div className="flex flex-col gap-2 md:flex-row md:items-center">
-      <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto">
+      <div className="flex min-w-0 flex-1 flex-wrap gap-2">
         <FilterChip
           label="All"
           count={counts.all}
@@ -52,6 +52,7 @@ export function FilterBar({
           <FilterChip
             key={member.id}
             label={member.name}
+            title={member.name}
             count={counts.byMember[member.id] ?? 0}
             active={memberId === member.id}
             onClick={() => onFilter({ memberId: member.id })}
