@@ -73,6 +73,26 @@ export default defineConfig([
       'no-restricted-imports': ['error', { patterns: iconImportPatterns }],
     },
   },
+  // Atomic Design: imports only point down a level (atoms < molecules < organisms < layout, pages).
+  ...[
+    ['atoms', ['**/molecules/*', '**/organisms/*', '**/layout/*', '**/pages/*', '**/store/*', '**/services/*']],
+    ['molecules', ['**/organisms/*', '**/layout/*', '**/pages/*', '**/store/*', '**/services/*']],
+    ['organisms', ['**/layout/*', '**/pages/*']],
+    ['layout', ['**/pages/*', '**/store/*', '**/services/*']],
+  ].map(([level, group]) => ({
+    files: [`src/components/${level}/**/*.{ts,tsx}`],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            ...iconImportPatterns,
+            { group, message: `components/${level} may not import from a higher level or from data.` },
+          ],
+        },
+      ],
+    },
+  })),
   {
     // The packing engine is pure logic: no React, no network, no Supabase.
     files: ['src/engine/**/*.ts'],

@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { AppShell } from './components/AppShell';
+import { AppShell } from './components/layout/AppShell';
 import { HomePage } from './pages/HomePage';
 import { TripPage } from './pages/TripPage';
 
