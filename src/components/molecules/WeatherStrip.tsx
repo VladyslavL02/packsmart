@@ -1,10 +1,15 @@
 import { CloudRain, CloudSun } from 'lucide-react';
+import { useState } from 'react';
 import type { WeatherSummary } from '../../engine/types';
+import { Collapse } from '../atoms/Collapse';
 import { Skeleton } from '../atoms/Skeleton';
 
-export function WeatherStrip({ state }: { state: 'idle' | 'loading' | WeatherSummary }) {
+type WeatherState = 'idle' | 'loading' | WeatherSummary;
+
+function content(state: WeatherState) {
   if (state === 'idle') {return null;}
-  if (state === 'loading') {return <Skeleton label="Loading weather" className="h-9" />;}
+  // Same height as the loaded strip, so the swap doesn't move anything.
+  if (state === 'loading') {return <Skeleton label="Loading weather" className="h-8" />;}
   const Icon = state.maxPrecipProbability >= 50 ? CloudRain : CloudSun;
 
   return (
@@ -19,5 +24,18 @@ export function WeatherStrip({ state }: { state: 'idle' | 'loading' | WeatherSum
         {state.isSeasonalEstimate && <span className="text-outline"> · seasonal estimate</span>}
       </span>
     </p>
+  );
+}
+
+export function WeatherStrip({ state }: { state: WeatherState }) {
+  // The last thing shown stays rendered while the strip closes.
+  const [shown, setShown] = useState(state);
+  if (state !== 'idle' && state !== shown) {setShown(state);}
+
+  return (
+    <Collapse open={state !== 'idle'}>
+      {/* The spacing is inside, so a closed strip takes no room at all. */}
+      {shown !== 'idle' && <div className="pt-3 md:pt-2">{content(shown)}</div>}
+    </Collapse>
   );
 }

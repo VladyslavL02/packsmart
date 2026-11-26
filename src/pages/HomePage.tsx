@@ -104,20 +104,22 @@ export function HomePage() {
         noValidate
       >
         <FormSection icon={Compass} title="Destination & dates">
-          <div className="grid gap-2 md:grid-cols-12">
-            <div className="md:col-span-6">
-              <CitySearch value={city} onChange={(next) => update({ city: next })} />
+          <div>
+            <div className="grid gap-2 md:grid-cols-12">
+              <div className="md:col-span-6">
+                <CitySearch value={city} onChange={(next) => update({ city: next })} />
+              </div>
+              <div className="md:col-span-6">
+                <DateRangeFields
+                  startDate={startDate}
+                  endDate={endDate}
+                  today={today}
+                  onChange={(start, end) => update({ startDate: start, endDate: end })}
+                />
+              </div>
             </div>
-            <div className="md:col-span-6">
-              <DateRangeFields
-                startDate={startDate}
-                endDate={endDate}
-                today={today}
-                onChange={(start, end) => update({ startDate: start, endDate: end })}
-              />
-            </div>
+            <WeatherStrip state={weatherState} />
           </div>
-          <WeatherStrip state={weatherState} />
         </FormSection>
         <FormSection icon={Shapes} title="Trip format">
           <TripTypePicker value={form.tripType} onChange={(tripType) => update({ tripType })} />

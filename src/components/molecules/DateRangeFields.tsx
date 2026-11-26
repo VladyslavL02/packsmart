@@ -1,5 +1,6 @@
 import { Calendar } from 'lucide-react';
 import { tripDays } from '../../engine/dates';
+import { Collapse } from '../atoms/Collapse';
 import { TextInput } from '../atoms/TextInput';
 
 type DateRangeFieldsProps = {
@@ -15,7 +16,7 @@ export function DateRangeFields({ startDate, endDate, today, onChange }: DateRan
   const days = startDate && endDate && !backwards ? tripDays(startDate, endDate) : null;
 
   return (
-    <div className="flex flex-col gap-1">
+    <div>
       <div className="grid grid-cols-2 gap-2">
         <label className="flex min-w-0 flex-col gap-1 text-xs text-outline">
           <span className="flex items-center gap-1">
@@ -53,8 +54,12 @@ export function DateRangeFields({ startDate, endDate, today, onChange }: DateRan
           />
         </label>
       </div>
-      {inPast && <p className="text-xs text-error">The departure date is in the past.</p>}
-      {backwards && <p className="text-xs text-error">The return date is before departure.</p>}
+      <Collapse open={inPast}>
+        <p className="pt-1 text-xs text-error">The departure date is in the past.</p>
+      </Collapse>
+      <Collapse open={backwards}>
+        <p className="pt-1 text-xs text-error">The return date is before departure.</p>
+      </Collapse>
     </div>
   );
 }

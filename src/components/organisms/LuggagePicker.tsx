@@ -26,16 +26,15 @@ export function LuggagePicker({ value, onChange }: LuggagePickerProps) {
             title={LUGGAGE_LABELS[type]}
             selected={Boolean(entry)}
             onClick={() => onChange(toggleLuggage(value, type))}
+            footerOpen={Boolean(entry)}
             footer={
-              entry && (
-                <Stepper
-                  label={`${LUGGAGE_LABELS[type]} count`}
-                  value={entry.count}
-                  min={1}
-                  max={MAX_LUGGAGE_COUNT}
-                  onChange={(count) => onChange(setLuggageCount(value, type, count))}
-                />
-              )
+              <Stepper
+                label={`${LUGGAGE_LABELS[type]} count`}
+                value={entry?.count ?? 1}
+                min={1}
+                max={MAX_LUGGAGE_COUNT}
+                onChange={(count) => onChange(setLuggageCount(value, type, count))}
+              />
             }
           />
         );

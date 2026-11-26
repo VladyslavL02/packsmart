@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { searchCities } from '../../services/weatherApi';
 import type { City } from '../../services/weatherApi';
 import type { TripCity } from '../../engine/tripForm';
+import { Collapse } from '../atoms/Collapse';
 import { TextInput } from '../atoms/TextInput';
 import { CityOption } from '../molecules/CityOption';
 
@@ -38,6 +39,7 @@ export function CitySearch({ value, onChange }: CitySearchProps) {
   const done = searching && result?.query === query;
   const cities = done ? result.cities : [];
   const expanded = open && cities.length > 0;
+  const noResults = done && cities.length === 0;
 
   const pick = (city: City) => {
     setQuery(city.name);
@@ -60,53 +62,62 @@ export function CitySearch({ value, onChange }: CitySearchProps) {
   };
 
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor="city" className="text-xs text-outline">
-        City
-      </label>
-      <div className="relative">
-        <TextInput
-          id="city"
-          role="combobox"
-          aria-expanded={expanded}
-          aria-controls="city-options"
-          aria-autocomplete="list"
-          autoComplete="off"
-          placeholder="e.g. Barcelona"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setOpen(true);
-            setActive(0);
-            // Edited text no longer means the picked city.
-            if (value) {onChange(null);}
-          }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setOpen(false)}
-          onKeyDown={onKeyDown}
-        />
-        <ul
-          id="city-options"
-          role="listbox"
-          hidden={!expanded}
-          className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-base border
-            border-outline-variant bg-surface-container-high shadow-xl"
-        >
-          {cities.map((city, index) => (
-            <CityOption
-              key={city.id}
-              name={city.name}
-              region={region(city)}
-              active={index === active}
-              // Keeps focus in the input, so blur doesn't close the list before the click.
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => pick(city)}
-            />
-          ))}
-        </ul>
+    <div>
+      <div className="flex flex-col gap-1">
+        <label htmlFor="city" className="text-xs text-outline">
+          City
+        </label>
+        <div className="relative">
+          <TextInput
+            id="city"
+            role="combobox"
+            aria-expanded={expanded}
+            aria-controls="city-options"
+            aria-autocomplete="list"
+            autoComplete="off"
+            placeholder="e.g. Barcelona"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+              setActive(0);
+              // Edited text no longer means the picked city.
+              if (value) {onChange(null);}
+            }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setOpen(false)}
+            onKeyDown={onKeyDown}
+          />
+          <ul
+            id="city-options"
+            role="listbox"
+            hidden={!expanded}
+            className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-base border
+              border-outline-variant bg-surface-container-high shadow-xl"
+          >
+            {cities.map((city, index) => (
+              <CityOption
+                key={city.id}
+                name={city.name}
+                region={region(city)}
+                active={index === active}
+                // Keeps focus in the input, so blur doesn't close the list before the click.
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => pick(city)}
+              />
+            ))}
+          </ul>
+        </div>
       </div>
-      {value && <p className="text-xs text-on-surface-variant">{region(value)}</p>}
-      {done && cities.length === 0 && <p className="text-xs text-outline">No cities found</p>}
+      <Collapse open={value !== null || noResults}>
+        {/* min-h keeps a height to animate while closing, after the text is gone. */}
+        <p
+          aria-live="polite"
+          className={`min-h-5 pt-1 text-xs ${value ? 'text-on-surface-variant' : 'text-outline'}`}
+        >
+          {value ? region(value) : noResults && 'No cities found'}
+        </p>
+      </Collapse>
     </div>
   );
 }

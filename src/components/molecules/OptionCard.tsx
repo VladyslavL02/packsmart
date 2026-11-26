@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
 import { CheckDot } from '../atoms/CheckDot';
+import { Collapse } from '../atoms/Collapse';
 
 type OptionCardProps = Omit<ComponentProps<'button'>, 'title'> & {
   icon: LucideIcon;
@@ -9,6 +10,7 @@ type OptionCardProps = Omit<ComponentProps<'button'>, 'title'> & {
   selected: boolean;
   /** Extra control inside the card but outside the toggle button, e.g. a count stepper. */
   footer?: ReactNode;
+  footerOpen?: boolean;
 };
 
 export function OptionCard({
@@ -17,6 +19,7 @@ export function OptionCard({
   subtitle,
   selected,
   footer,
+  footerOpen = false,
   ...props
 }: OptionCardProps) {
   return (
@@ -42,7 +45,11 @@ export function OptionCard({
           </span>
         )}
       </button>
-      {footer && <div className="px-3 pb-3">{footer}</div>}
+      {footer && (
+        <Collapse open={footerOpen}>
+          <div className="px-3 pb-3">{footer}</div>
+        </Collapse>
+      )}
     </div>
   );
 }
