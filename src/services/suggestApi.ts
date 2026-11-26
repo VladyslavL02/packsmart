@@ -11,8 +11,10 @@ import type {
 const SUGGEST_URL = '/api/suggest';
 // Longer than the server's 8s budget, so the server's own answer normally wins over a client abort.
 const CLIENT_TIMEOUT_MS = 10_000;
-// Matches SuggestRequestSchema's existingItems max.
+// These three mirror SuggestRequestSchema / ExistingItemSchema; anything over them gets a 400.
 const MAX_EXISTING_ITEMS = 150;
+const MAX_TITLE = 60;
+const MAX_REASON = 140;
 
 const unavailable = (): SuggestResponse => ({ items: [], status: 'unavailable' });
 
@@ -32,15 +34,21 @@ export async function fetchAiSuggestions(
   try {
     // One entry per title (per-member rows collapse), with category and reason so the AI sees the purpose.
     const unique = new Map<string, SuggestRequest['existingItems'][number]>();
+    // User-typed rows have no length limit, so cut (not skip) them: the AI still sees the item.
     for (const item of baseItems) {
+      const title = item.title.trim().slice(0, MAX_TITLE);
       const id = normalizeTitle(item.title);
-      if (!unique.has(id)) {
-        unique.set(id, { title: item.title, category: item.category, reason: item.reason });
+      if (title && !unique.has(id)) {
+        const reason = item.reason?.slice(0, MAX_REASON) ?? null;
+        unique.set(id, { title, category: item.category, reason });
       }
     }
     const existingItems = [...unique.values()].slice(0, MAX_EXISTING_ITEMS);
     const timeout = AbortSignal.timeout(CLIENT_TIMEOUT_MS);
-    const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    // AbortSignal.any is missing on iOS Safari < 17.4: keep the timeout there. The caller's cancel
+    // then doesn't stop the request, which is why callers check signal.aborted.
+    const canCombine = signal && typeof AbortSignal.any === 'function';
+    const combined = canCombine ? AbortSignal.any([signal, timeout]) : timeout;
     const res = await fetch(SUGGEST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

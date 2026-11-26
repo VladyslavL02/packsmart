@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { SuggestRequestSchema } from '../engine/types';
 import type { PackingItemDraft, TripInput, WeatherSummary } from '../engine/types';
 import { fetchAiSuggestions } from './suggestApi';
 
@@ -171,6 +172,38 @@ describe('fetchAiSuggestions', () => {
     const body = JSON.parse(init.body as string) as { existingItems: { title: string }[] };
     expect(body.existingItems).toHaveLength(150);
     expect(body.existingItems[0].title).toBe('Item 0');
+  });
+
+  // Retry sends the current rows, including user-typed ones with no length limit.
+  it('cuts long titles and reasons to the contract so the server never rejects them', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [], status: 'ok' }));
+
+    await fetchAiSuggestions(trip, weather, [
+      draft({ key: null, source: 'user', title: `  ${'t'.repeat(200)}`, reason: 'r'.repeat(300) }),
+      draft({ key: null, source: 'user', title: '   ' }),
+    ]);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const parsed = SuggestRequestSchema.safeParse(JSON.parse(init.body as string));
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.existingItems).toEqual([
+      { title: 't'.repeat(60), category: 'clothing', reason: 'r'.repeat(140) },
+    ]);
+  });
+
+  // iOS Safari before 17.4.
+  it('still sends the request when AbortSignal.any is missing', async () => {
+    const original = AbortSignal.any;
+    Object.defineProperty(AbortSignal, 'any', { value: undefined, configurable: true, writable: true });
+    onTestFinished(() => {
+      Object.defineProperty(AbortSignal, 'any', { value: original, configurable: true, writable: true });
+    });
+    fetchMock.mockResolvedValue(jsonResponse({ items: [], status: 'ok' }));
+
+    const result = await fetchAiSuggestions(trip, weather, [], new AbortController().signal);
+
+    expect(result.status).toBe('ok');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   // A fetch that never answers, and rejects like the real one when its signal fires.

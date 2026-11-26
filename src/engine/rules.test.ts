@@ -12,7 +12,8 @@ import {
   deriveWeatherFlags,
 } from './rules';
 import type { PackingCapacity, Rule, RuleContext, WeatherFlags } from './rules';
-import { CATEGORIES, TRIP_TYPES } from './types';
+import { generateBasePackingList } from './generator';
+import { CATEGORIES, ExistingItemSchema, TRIP_TYPES } from './types';
 import type { LuggageEntry, Member, TripInput, WeatherSummary } from './types';
 
 // ---------- fixture builders ----------
@@ -890,5 +891,48 @@ describe('second reviewer pass', () => {
     expect(reasonOf(shoes, ctxFromTrip(trip(), rainy))).toContain('waterproof');
     expect(reasonOf(shoes, ctxFromTrip(trip(), cold))).toContain('waterproof');
     expect(reasonOf(shoes, ctxFromTrip(trip(), weather()))).not.toContain('waterproof');
+  });
+});
+
+// The rules list is sent to /api/suggest as existingItems; one over-long field would 400 the request.
+describe('suggest contract', () => {
+  const extremes: Array<WeatherSummary | null> = [
+    null,
+    weather({ minTemp: 12, isSeasonalEstimate: true, source: 'seasonal' }),
+    weather({ minTemp: 24, maxTemp: 38, rainDays: 14, maxPrecipProbability: 100 }),
+    weather({
+      minTemp: -35.5,
+      maxTemp: -20.5,
+      rainDays: 14,
+      maxPrecipProbability: 100,
+      isSeasonalEstimate: true,
+      source: 'seasonal',
+    }),
+  ];
+  // The mixed entry switches on the carry-on rules, which need a checked bag too.
+  const bags = [[entry('personal')], [entry('carryOn')], [entry('checked'), entry('carryOn')]];
+
+  it('every rule is generated and fits ExistingItemSchema', () => {
+    const generated = new Set<string | null>();
+    for (const tripType of TRIP_TYPES) {
+      for (const w of extremes) {
+        for (const luggage of bags) {
+          const input = tripOfDays(30, { tripType, members: members(2, 2), luggage });
+          for (const item of generateBasePackingList(input, w)) {
+            generated.add(item.key);
+            const result = ExistingItemSchema.safeParse(item);
+            expect(result.success, `${item.title} / ${item.reason}`).toBe(true);
+          }
+        }
+      }
+    }
+    const allKeys = [
+      ...BASE_RULES,
+      ...WEATHER_RULES,
+      ...Object.values(TRIP_TYPE_RULES).flat(),
+      ...LUGGAGE_RULES,
+      ...FAMILY_RULES,
+    ].map((rule) => rule.key);
+    expect(allKeys.filter((key) => !generated.has(key))).toEqual([]);
   });
 });
