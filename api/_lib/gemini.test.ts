@@ -3,6 +3,7 @@ import type { SuggestRequest } from '../../src/engine/types.js';
 import {
   GEMINI_URL,
   MAX_AI_ITEMS,
+  MAX_OUTPUT_TOKENS,
   RETRY_DELAY_MS,
   RETRY_STATUSES,
   buildPrompt,
@@ -64,7 +65,7 @@ const jsonResponse = (body: unknown, status = 200) =>
 
 describe('parseGeminiResponse', () => {
   it('parses a valid response', () => {
-    const out = parseGeminiResponse(envelopeOf([item('Umbrella'), item('Adapter', { reason: null })]));
+    const out = parseGeminiResponse(envelopeOf([item('Umbrella'), item('Adapter', { reason: null })]))!;
     expect(out.map((i) => i.title)).toEqual(['Umbrella', 'Adapter']);
     expect(out[1].reason).toBeNull();
   });
@@ -78,26 +79,30 @@ describe('parseGeminiResponse', () => {
     const out = parseGeminiResponse(
       envelopeOf([item('Good'), item('Bad', { category: 'nope' }), { nonsense: true }, item('Fine')]),
     );
-    expect(out.map((i) => i.title)).toEqual(['Good', 'Fine']);
+    expect(out?.map((i) => i.title)).toEqual(['Good', 'Fine']);
   });
 
-  it('returns [] for non-JSON text', () => {
-    expect(parseGeminiResponse(envelope('not json {'))).toEqual([]);
+  it('returns [] for a valid empty array', () => {
+    expect(parseGeminiResponse(envelopeOf([]))).toEqual([]);
   });
 
-  it('returns [] when text is an object, not an array', () => {
-    expect(parseGeminiResponse(envelope(JSON.stringify({ title: 'x' })))).toEqual([]);
+  it('returns null for non-JSON text', () => {
+    expect(parseGeminiResponse(envelope('not json {'))).toBeNull();
   });
 
-  it('returns [] for a blocked prompt', () => {
-    expect(parseGeminiResponse({ promptFeedback: { blockReason: 'SAFETY' } })).toEqual([]);
+  it('returns null when text is an object, not an array', () => {
+    expect(parseGeminiResponse(envelope(JSON.stringify({ title: 'x' })))).toBeNull();
   });
 
-  it('returns [] for empty candidates, empty parts and garbage', () => {
-    expect(parseGeminiResponse({ candidates: [] })).toEqual([]);
-    expect(parseGeminiResponse({ candidates: [{ content: { parts: [] } }] })).toEqual([]);
-    expect(parseGeminiResponse(null)).toEqual([]);
-    expect(parseGeminiResponse('x')).toEqual([]);
+  it('returns null for a blocked prompt', () => {
+    expect(parseGeminiResponse({ promptFeedback: { blockReason: 'SAFETY' } })).toBeNull();
+  });
+
+  it('returns null for empty candidates, empty parts and garbage', () => {
+    expect(parseGeminiResponse({ candidates: [] })).toBeNull();
+    expect(parseGeminiResponse({ candidates: [{ content: { parts: [] } }] })).toBeNull();
+    expect(parseGeminiResponse(null)).toBeNull();
+    expect(parseGeminiResponse('x')).toBeNull();
   });
 });
 
@@ -115,12 +120,12 @@ describe('parseGeminiResponse: thought parts and a real response', () => {
         },
       ],
     };
-    expect(parseGeminiResponse(json).map((i) => i.title)).toEqual(['Umbrella']);
+    expect(parseGeminiResponse(json)?.map((i) => i.title)).toEqual(['Umbrella']);
   });
 
-  it('returns [] when every part is a thought', () => {
+  it('returns null when every part is a thought', () => {
     const json = { candidates: [{ content: { parts: [{ text: '[]', thought: true }] } }] };
-    expect(parseGeminiResponse(json)).toEqual([]);
+    expect(parseGeminiResponse(json)).toBeNull();
   });
 
   // Trimmed from a real gemini-flash-lite-latest (= gemini-3.5-flash-lite) call, 2026-11-26.
@@ -138,7 +143,7 @@ describe('parseGeminiResponse: thought parts and a real response', () => {
       modelVersion: 'gemini-3.5-flash-lite',
     };
     const out = parseGeminiResponse(real);
-    expect(out.map((i) => i.title)).toEqual([
+    expect(out?.map((i) => i.title)).toEqual([
       'Business Suit',
       'Dress Shirts',
       'Wool Overcoat',
@@ -250,6 +255,8 @@ describe('getAiSuggestions', () => {
       maximum: 10,
     });
     expect(body.contents[0].parts[0].text).toContain('London');
+    expect(body.generationConfig.maxOutputTokens).toBe(MAX_OUTPUT_TOKENS);
+    expect(MAX_OUTPUT_TOKENS).toBe(2500);
   });
 
   it('is unavailable without calling fetch when the key is missing', async () => {
@@ -303,15 +310,31 @@ describe('getAiSuggestions', () => {
     expect(await pending).toEqual(UNAVAILABLE);
   });
 
-  it('is empty for a blocked response', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ promptFeedback: { blockReason: 'SAFETY' } })));
-    expect(await getAiSuggestions(req, KEY)).toEqual({ items: [], status: 'empty' });
-    expect(warn).toHaveBeenCalledWith('[gemini] no valid items');
+  it.each([
+    ['a blocked prompt', { promptFeedback: { blockReason: 'SAFETY' } }],
+    ['no candidates', { candidates: [] }],
+    ['a candidate blocked without content', { candidates: [{ finishReason: 'SAFETY' }] }],
+    ['non-JSON text', envelope('not json {')],
+    ['a non-array answer', envelope('{}')],
+  ])('is unavailable for %s', async (_label, body) => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(body)));
+    expect(await getAiSuggestions(req, KEY)).toEqual(UNAVAILABLE);
+    expect(warn).toHaveBeenCalledWith('[gemini] unparseable response');
   });
 
-  it('is empty when Gemini answers 200 with non-JSON text', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(envelope('not json {'))));
+  it.each([
+    ['cut-off JSON', { content: { parts: [{ text: '[{"title":"Umb' }] }, finishReason: 'MAX_TOKENS' }],
+    ['no parts at all', { content: {}, finishReason: 'MAX_TOKENS' }],
+  ])('is unavailable and logs truncation for %s', async (_label, candidate) => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ candidates: [candidate] })));
+    expect(await getAiSuggestions(req, KEY)).toEqual(UNAVAILABLE);
+    expect(warn).toHaveBeenCalledWith('[gemini] truncated');
+  });
+
+  it('is empty when the model returns an empty array', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(envelopeOf([]))));
     expect(await getAiSuggestions(req, KEY)).toEqual({ items: [], status: 'empty' });
+    expect(warn).toHaveBeenCalledWith('[gemini] no valid items');
   });
 
   it('is empty when every item is invalid', async () => {

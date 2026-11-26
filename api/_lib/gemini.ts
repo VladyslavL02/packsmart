@@ -12,6 +12,8 @@ export const GEMINI_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent';
 export const GEMINI_TIMEOUT_MS = 8000;
 export const MAX_AI_ITEMS = 15;
+// 15 items with long reasons run past 1000 tokens; a cut-off answer is invalid JSON and loses all.
+export const MAX_OUTPUT_TOKENS = 2500;
 // Gemini answers 429/503 when it is busy; one quick retry fits inside the 8 s budget.
 export const RETRY_STATUSES: readonly number[] = [429, 503];
 export const RETRY_DELAY_MS = 500;
@@ -47,13 +49,19 @@ const EnvelopeSchema = z.object({
     .min(1),
 });
 
+// Read apart from the envelope: a truncated candidate may have no parts and fail EnvelopeSchema.
+const TruncatedSchema = z.looseObject({
+  candidates: z.tuple([z.looseObject({ finishReason: z.literal('MAX_TOKENS') })], z.unknown()),
+});
+
 const dayCount = (start: string, end: string): number =>
   Math.round((Date.parse(end) - Date.parse(start)) / 86_400_000) + 1;
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // The rules list grouped by category, as "Title (reason); Title2", so the model can tell what is covered.
-// Titles and reasons come from our own rules, not user input, so they are not fenced like the notes.
+// Not fenced like the notes. On a retry this can include user-typed titles (cut to 60 chars by the
+// client); the worst case is odd suggestions on their own trip, and the output is still validated.
 function formatExistingItems(items: SuggestRequest['existingItems']): string[] {
   const lines = CATEGORIES.flatMap((category) => {
     const inCategory = items.filter((item) => item.category === category);
@@ -134,23 +142,24 @@ export function buildPrompt(req: SuggestRequest): string {
   return lines.join('\n');
 }
 
-export function parseGeminiResponse(json: unknown): AiSuggestion[] {
+/** null = the answer is broken (blocked, cut off, not a JSON array); [] = nothing usable in it. */
+export function parseGeminiResponse(json: unknown): AiSuggestion[] | null {
   const envelope = EnvelopeSchema.safeParse(json);
-  if (!envelope.success) {return [];}
+  if (!envelope.success) {return null;}
 
   // Thinking models may put thought parts first; the answer is the first non-thought text part.
   const answer = envelope.data.candidates[0].content.parts.find(
     (part) => part.thought !== true && typeof part.text === 'string',
   )?.text;
-  if (answer === undefined) {return [];}
+  if (answer === undefined) {return null;}
 
   let data: unknown;
   try {
     data = JSON.parse(answer);
   } catch {
-    return [];
+    return null;
   }
-  if (!Array.isArray(data)) {return [];}
+  if (!Array.isArray(data)) {return null;}
 
   const items: AiSuggestion[] = [];
   for (const raw of data) {
@@ -189,7 +198,7 @@ export async function getAiSuggestions(
             responseMimeType: 'application/json',
             responseSchema: RESPONSE_SCHEMA,
             temperature: 0.4,
-            maxOutputTokens: 1500,
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
           },
         }),
         signal: combined,
@@ -205,7 +214,14 @@ export async function getAiSuggestions(
 
       return unavailable();
     }
-    const items = parseGeminiResponse(await response.json());
+    const json: unknown = await response.json();
+    if (TruncatedSchema.safeParse(json).success) {console.warn('[gemini] truncated');}
+    const items = parseGeminiResponse(json);
+    if (items === null) {
+      console.warn('[gemini] unparseable response');
+
+      return unavailable();
+    }
     if (items.length === 0) {
       console.warn('[gemini] no valid items');
 
