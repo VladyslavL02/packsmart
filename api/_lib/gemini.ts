@@ -50,8 +50,8 @@ const EnvelopeSchema = z.object({
 });
 
 // Read apart from the envelope: a truncated candidate may have no parts and fail EnvelopeSchema.
-const TruncatedSchema = z.looseObject({
-  candidates: z.tuple([z.looseObject({ finishReason: z.literal('MAX_TOKENS') })], z.unknown()),
+const FinishSchema = z.looseObject({
+  candidates: z.tuple([z.looseObject({ finishReason: z.string() })], z.unknown()),
 });
 
 const dayCount = (start: string, end: string): number =>
@@ -215,7 +215,12 @@ export async function getAiSuggestions(
       return unavailable();
     }
     const json: unknown = await response.json();
-    if (TruncatedSchema.safeParse(json).success) {console.warn('[gemini] truncated');}
+    const finish = FinishSchema.safeParse(json);
+    if (finish.success) {
+      const { finishReason } = finish.data.candidates[0];
+      console.log('[gemini] finishReason', finishReason);
+      if (finishReason === 'MAX_TOKENS') {console.warn('[gemini] truncated');}
+    }
     const items = parseGeminiResponse(json);
     if (items === null) {
       console.warn('[gemini] unparseable response');

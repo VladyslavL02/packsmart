@@ -329,6 +329,17 @@ describe('getAiSuggestions', () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ candidates: [candidate] })));
     expect(await getAiSuggestions(req, KEY)).toEqual(UNAVAILABLE);
     expect(warn).toHaveBeenCalledWith('[gemini] truncated');
+    expect(warnedText()).not.toContain('Umb');
+  });
+
+  it('logs the finish reason, so truncation margin can be checked in the server log', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const { content } = envelopeOf([item('Umbrella')]).candidates[0];
+    const body = { candidates: [{ content, finishReason: 'STOP' }] };
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(body)));
+
+    expect((await getAiSuggestions(req, KEY)).status).toBe('ok');
+    expect(log).toHaveBeenCalledWith('[gemini] finishReason', 'STOP');
   });
 
   it('is empty when the model returns an empty array', async () => {
