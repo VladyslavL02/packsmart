@@ -118,6 +118,7 @@ describe('tripStore', () => {
     [0, 1],
     [-3, 1],
     [Number.NaN, 1],
+    [Number.POSITIVE_INFINITY, 1],
     [4, 4],
   ])('stores quantity %s as %s and keeps the source', (input, expected) => {
     const { store, tripId, rows } = setup();
@@ -127,6 +128,39 @@ describe('tripStore', () => {
     store.getState().setQuantity(tripId, id, input);
 
     expect(rows()[0]).toMatchObject({ id, quantity: expected, source: 'rules' });
+  });
+
+  it('rejects a trip with no members and saves nothing', () => {
+    const { mem, store } = setup();
+    const saved = mem.map.get('packsmart');
+
+    expect(() => store.getState().createTrip({ ...trip, members: [] }, weather)).toThrow();
+
+    expect(Object.keys(store.getState().trips)).toHaveLength(1);
+    expect(mem.map.get('packsmart')).toBe(saved);
+  });
+
+  it('sets and overwrites the current member for one trip only', () => {
+    const { store, tripId } = setup();
+    const otherId = store.getState().createTrip(familyTrip, weather);
+    store.getState().setCurrentMember(otherId, 'a2');
+
+    store.getState().setCurrentMember(tripId, 'a1');
+    store.getState().setCurrentMember(tripId, 'c1');
+
+    expect(store.getState().currentMember).toEqual({ [tripId]: 'c1', [otherId]: 'a2' });
+  });
+
+  it('updates lastOpenedAt on touch and ignores an unknown trip', () => {
+    const { store, tripId } = setup();
+    const before = store.getState().trips[tripId];
+    const later = '2026-05-21T08:00:00.000Z';
+    vi.setSystemTime(new Date(later));
+
+    store.getState().touchTrip(tripId);
+    store.getState().touchTrip('no-trip');
+
+    expect(store.getState().trips).toEqual({ [tripId]: { ...before, lastOpenedAt: later } });
   });
 
   it('deletes exactly one row and leaves the others unchanged', () => {

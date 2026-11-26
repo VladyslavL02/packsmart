@@ -44,6 +44,7 @@ const PersistedSchema = z.object({
 type TripData = z.infer<typeof PersistedSchema>;
 
 type TripActions = {
+  /** Throws on input that fails TripInputSchema: once saved, it would discard every trip on reload. */
   createTrip: (input: TripInput, weather: WeatherSummary | null) => string;
   togglePacked: (tripId: string, itemId: string) => void;
   setQuantity: (tripId: string, itemId: string, quantity: number) => void;
@@ -117,7 +118,8 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
           ...emptyData(),
 
           // The only place the rules run: existing rows are never regenerated.
-          createTrip: (input, weather) => {
+          createTrip: (rawInput, weather) => {
+            const input = TripInputSchema.parse(rawInput);
             const id = crypto.randomUUID();
             const now = new Date().toISOString();
             const trip: StoredTrip = { ...input, id, weather, createdAt: now, lastOpenedAt: now };
@@ -135,8 +137,8 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
           },
 
           setQuantity: (tripId, itemId, quantity) => {
-            // `|| 1` also catches NaN, which Math.max would pass through.
-            const clamped = Math.max(1, Math.round(quantity) || 1);
+            // NaN and Infinity save as null, which would discard every trip on reload.
+            const clamped = Number.isFinite(quantity) ? Math.max(1, Math.round(quantity)) : 1;
             updateItem(tripId, itemId, (item) => ({ ...item, quantity: clamped }));
           },
 
