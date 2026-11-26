@@ -29,7 +29,10 @@ const validBody: SuggestRequest = {
     isSeasonalEstimate: false,
     source: 'forecast',
   },
-  existingTitles: ['Passport', 'Toothbrush'],
+  existingItems: [
+    { title: 'Passport', category: 'documents', reason: null },
+    { title: 'Toothbrush', category: 'toiletries', reason: 'Daily hygiene' },
+  ],
 };
 
 const item = (title: string, extra: Record<string, unknown> = {}) => ({
@@ -71,22 +74,32 @@ describe('POST /api/suggest', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
-    const json = (await res.json()) as { items: { title: string }[] };
+    const json = (await res.json()) as { items: { title: string }[]; status: string };
+    expect(json.status).toBe('ok');
     expect(json.items).toHaveLength(2);
     expect(json.items.map((i) => i.title)).toEqual(['Umbrella', 'Adapter']);
+  });
+
+  it('returns 200 with status empty when Gemini answers but has no valid items', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(envelopeOf([{ nonsense: true }]))));
+
+    const res = await POST(makeRequest(JSON.stringify(validBody)));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ items: [], status: 'empty' });
   });
 
   it('returns 400 with empty items and no fetch for a schema-invalid body', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const invalid: Partial<typeof validBody> = { ...validBody };
-    delete invalid.existingTitles;
+    delete invalid.existingItems;
 
     const res = await POST(makeRequest(JSON.stringify(invalid)));
 
     expect(res.status).toBe(400);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
-    expect(await res.json()).toEqual({ items: [] });
+    expect(await res.json()).toEqual({ items: [], status: 'unavailable' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -98,21 +111,21 @@ describe('POST /api/suggest', () => {
 
     expect(res.status).toBe(400);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
-    expect(await res.json()).toEqual({ items: [] });
+    expect(await res.json()).toEqual({ items: [], status: 'unavailable' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('returns 200 with empty items when Gemini responds with HTTP 500', async () => {
+  it('returns 200 with status unavailable when Gemini responds with HTTP 500', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'boom' }, 500)));
 
     const res = await POST(makeRequest(JSON.stringify(validBody)));
 
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
-    expect(await res.json()).toEqual({ items: [] });
+    expect(await res.json()).toEqual({ items: [], status: 'unavailable' });
   });
 
-  it('returns 200 with empty items and no fetch when the API key is missing', async () => {
+  it('returns 200 with status unavailable and no fetch when the API key is missing', async () => {
     vi.stubEnv('GEMINI_API_KEY', '');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -121,11 +134,11 @@ describe('POST /api/suggest', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
-    expect(await res.json()).toEqual({ items: [] });
+    expect(await res.json()).toEqual({ items: [], status: 'unavailable' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('returns 200 with empty items and no fetch when the request signal is already aborted', async () => {
+  it('returns 200 unavailable and no fetch when the request signal is already aborted', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const controller = new AbortController();
@@ -135,7 +148,7 @@ describe('POST /api/suggest', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
-    expect(await res.json()).toEqual({ items: [] });
+    expect(await res.json()).toEqual({ items: [], status: 'unavailable' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

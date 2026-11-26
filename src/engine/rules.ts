@@ -354,7 +354,8 @@ export const WEATHER_RULES: Rule[] = [
     title: 'Cap',
     category: 'clothing',
     appliesTo: 'everyone',
-    when: needsSunProtection,
+    // In freezing or cold-mountain weather the Warm hat covers the head; sunglasses and sunscreen stay.
+    when: (ctx) => needsSunProtection(ctx) && !needsHandsAndHead(ctx),
     reason: sunReason,
   },
 ];

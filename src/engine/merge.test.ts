@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeItems } from './merge';
+import { AI_MAX_PER_PERSON, mergeItems, normalizeAiScope } from './merge';
 import { PackingItemDraftSchema } from './types';
 import type { AiSuggestion, Member, PackingItemDraft } from './types';
 
@@ -183,5 +183,201 @@ describe('mergeItems', () => {
 
     expect(forward.length).toBeGreaterThan(base.length);
     expect(backward).toEqual(forward);
+  });
+});
+
+describe('mergeItems: per-person cap', () => {
+  it('exports a cap of 3', () => {
+    expect(AI_MAX_PER_PERSON).toBe(3);
+  });
+
+  it.each(['everyone', 'adult', 'child'] as const)('caps quantity for %s scope', (scope) => {
+    const result = aiRows(
+      mergeItems([], [suggestion({ title: 'Snacks', scope, quantity: 8 })], [adult('a1'), child('c1')]),
+    );
+
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.every((row) => row.quantity === AI_MAX_PER_PERSON)).toBe(true);
+  });
+
+  it('keeps a quantity below the cap for per-person scopes', () => {
+    const result = aiRows(
+      mergeItems([], [suggestion({ title: 'Snacks', scope: 'everyone', quantity: 2 })], [adult()]),
+    );
+
+    expect(result[0].quantity).toBe(2);
+  });
+
+  it('keeps the full quantity for shared scope', () => {
+    const result = aiRows(
+      mergeItems([], [suggestion({ title: 'Water jugs', scope: 'shared', quantity: 8 })], [adult()]),
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].quantity).toBe(8);
+  });
+});
+
+describe('mergeItems: synonym dedupe', () => {
+  const sunCap = (overrides: Partial<PackingItemDraft> = {}) =>
+    draft({ key: 'sun-cap', title: 'Cap', category: 'clothing', ...overrides });
+
+  it('drops a shared AI item that matches any base row', () => {
+    const base = [sunCap()];
+
+    const result = mergeItems(base, [suggestion({ title: 'Sun hat', scope: 'shared' })], [adult()]);
+
+    expect(aiRows(result)).toHaveLength(0);
+    expect(result).toEqual(base);
+  });
+
+  it('skips only the member whose base row matches, others still get the item', () => {
+    const base = [sunCap()];
+    const roster = [adult('a1'), child('c1')];
+
+    const result = aiRows(
+      mergeItems(base, [suggestion({ title: 'Sun hat', scope: 'everyone' })], roster),
+    );
+
+    expect(result.map((row) => row.memberId)).toEqual(['c1']);
+  });
+
+  it('skips every member when a shared base row matches', () => {
+    const base = [sunCap({ scope: 'shared', memberId: null })];
+    const roster = [adult('a1'), child('c1')];
+
+    const result = mergeItems(base, [suggestion({ title: 'Sun hat', scope: 'everyone' })], roster);
+
+    expect(aiRows(result)).toHaveLength(0);
+  });
+
+  it('keeps an AI item that matches no base row and leaves base rows unchanged', () => {
+    const base = [sunCap()];
+    const snapshot = structuredClone(base);
+
+    const result = mergeItems(base, [suggestion({ title: 'Board game' })], [adult()]);
+
+    expect(aiRows(result)).toHaveLength(1);
+    expect(base).toEqual(snapshot);
+    expect(result).toContainEqual(snapshot[0]);
+  });
+});
+
+describe('normalizeAiScope', () => {
+  const family = [adult('a1'), adult('a2'), child('c1')];
+  const scopeOf = (category: AiSuggestion['category'], scope: AiSuggestion['scope']) =>
+    normalizeAiScope(suggestion({ category, scope }), family);
+
+  it.each(['documents', 'electronics'] as const)('moves %s everyone and child to adult', (cat) => {
+    expect(scopeOf(cat, 'everyone')).toBe('adult');
+    expect(scopeOf(cat, 'child')).toBe('adult');
+  });
+
+  it.each(['documents', 'electronics'] as const)('keeps %s adult and shared', (cat) => {
+    expect(scopeOf(cat, 'adult')).toBe('adult');
+    expect(scopeOf(cat, 'shared')).toBe('shared');
+  });
+
+  it('moves health everyone and adult to shared', () => {
+    expect(scopeOf('health', 'everyone')).toBe('shared');
+    expect(scopeOf('health', 'adult')).toBe('shared');
+  });
+
+  it('keeps health child and shared', () => {
+    expect(scopeOf('health', 'child')).toBe('child');
+    expect(scopeOf('health', 'shared')).toBe('shared');
+  });
+
+  it.each(['clothing', 'toiletries', 'kids', 'misc'] as const)('leaves %s untouched', (cat) => {
+    for (const scope of ['everyone', 'adult', 'child', 'shared'] as const) {
+      expect(scopeOf(cat, scope)).toBe(scope);
+    }
+  });
+
+  it('falls back to the original scope when the result is adult but there are no adults', () => {
+    const kids = [child('c1'), child('c2')];
+    const everyone = suggestion({ category: 'documents', scope: 'everyone' });
+    const onlyChild = suggestion({ category: 'electronics', scope: 'child' });
+    expect(normalizeAiScope(everyone, kids)).toBe('everyone');
+    expect(normalizeAiScope(onlyChild, kids)).toBe('child');
+  });
+});
+
+describe('mergeItems: deterministic scope by category', () => {
+  const roster = [adult('a1'), adult('a2'), child('c1'), child('c2')];
+
+  it('turns health everyone into one uncapped shared row', () => {
+    const ai = [
+      suggestion({ title: 'Motion sickness pills', category: 'health', scope: 'everyone', quantity: 8 }),
+    ];
+
+    const result = aiRows(mergeItems([], ai, roster));
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ scope: 'shared', memberId: null, quantity: 8 });
+  });
+
+  it('gives electronics everyone rows to adults only', () => {
+    const ai = [
+      suggestion({ title: 'Waterproof phone pouch', category: 'electronics', scope: 'everyone' }),
+    ];
+
+    const result = aiRows(mergeItems([], ai, roster));
+
+    expect(result.map((row) => row.memberId).sort()).toEqual(['a1', 'a2']);
+    expect(result.every((row) => row.scope === 'adult')).toBe(true);
+  });
+
+  it('keeps health child as per-child rows', () => {
+    const ai = [suggestion({ title: "Kids' fever medicine", category: 'health', scope: 'child' })];
+
+    const result = aiRows(mergeItems([], ai, roster));
+
+    expect(result.map((row) => row.memberId).sort()).toEqual(['c1', 'c2']);
+    expect(result.every((row) => row.scope === 'child')).toBe(true);
+  });
+
+  it('keeps documents everyone per child on an all-children trip', () => {
+    const ai = [suggestion({ title: 'Travel consent letter', category: 'documents', scope: 'everyone' })];
+
+    const result = aiRows(mergeItems([], ai, [child('c1'), child('c2')]));
+
+    expect(result.map((row) => row.memberId).sort()).toEqual(['c1', 'c2']);
+    expect(result.every((row) => row.scope === 'child')).toBe(true);
+  });
+
+  it('makes group gear one shared row even when the model said everyone', () => {
+    const ai = [suggestion({ title: 'Camera', category: 'electronics', scope: 'everyone' })];
+
+    const result = aiRows(mergeItems([], ai, roster));
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ scope: 'shared', memberId: null });
+  });
+
+  it('gives a shared adapter one per adult, at most 2', () => {
+    const adapter = suggestion({
+      title: 'Universal travel adapter',
+      category: 'electronics',
+      scope: 'shared',
+      quantity: 1,
+    });
+
+    expect(aiRows(mergeItems([], [adapter], roster))[0].quantity).toBe(2);
+    expect(aiRows(mergeItems([], [adapter], [adult('a1')]))[0].quantity).toBe(1);
+    const three = [adult('a1'), adult('a2'), adult('a3')];
+    expect(aiRows(mergeItems([], [adapter], three))[0].quantity).toBe(2);
+  });
+
+  it('keeps a higher adapter quantity the model asked for', () => {
+    const adapter = suggestion({ title: 'Plug adapter', category: 'electronics', scope: 'shared', quantity: 3 });
+
+    expect(aiRows(mergeItems([], [adapter], roster))[0].quantity).toBe(3);
+  });
+
+  it('does not treat words that only contain a gear word as gear', () => {
+    const ai = [suggestion({ title: 'Cameraman vest', category: 'clothing', scope: 'everyone' })];
+
+    expect(aiRows(mergeItems([], ai, roster))).toHaveLength(4);
   });
 });

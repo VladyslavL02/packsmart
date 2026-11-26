@@ -8,6 +8,7 @@ import {
   PackingItemDraftSchema,
   PackingItemSchema,
   SuggestRequestSchema,
+  SuggestResponseSchema,
   TRIP_TYPES,
   TripInputSchema,
   WeatherSummarySchema,
@@ -366,12 +367,22 @@ describe('AiSuggestionSchema', () => {
 });
 
 describe('SuggestRequestSchema', () => {
+  const existingItem = (overrides: Record<string, unknown> = {}) => ({
+    title: 'Passport',
+    category: 'documents',
+    reason: null,
+    ...overrides,
+  });
+
   const validRequest = (overrides: Record<string, unknown> = {}) => ({
     trip: validTrip(),
     weather: validWeather(),
-    existingTitles: ['Passport'],
+    existingItems: [existingItem()],
     ...overrides,
   });
+
+  const items = (n: number) =>
+    Array.from({ length: n }, (_, i) => existingItem({ title: `Item ${i}` }));
 
   it('parses a valid request', () => {
     expect(SuggestRequestSchema.safeParse(validRequest()).success).toBe(true);
@@ -381,14 +392,25 @@ describe('SuggestRequestSchema', () => {
     expect(SuggestRequestSchema.safeParse(validRequest({ weather: null })).success).toBe(true);
   });
 
-  it('accepts 150 existing titles but rejects 151', () => {
-    const titles = (n: number) => Array.from({ length: n }, (_, i) => `Item ${i}`);
-    expect(
-      SuggestRequestSchema.safeParse(validRequest({ existingTitles: titles(150) })).success,
-    ).toBe(true);
-    expect(
-      SuggestRequestSchema.safeParse(validRequest({ existingTitles: titles(151) })).success,
-    ).toBe(false);
+  it('accepts a string reason up to 140 chars', () => {
+    const existingItems = [existingItem({ reason: 'a'.repeat(140) })];
+    expect(SuggestRequestSchema.safeParse(validRequest({ existingItems })).success).toBe(true);
+  });
+
+  it('accepts 150 existing items but rejects 151', () => {
+    const parse = (count: number) =>
+      SuggestRequestSchema.safeParse(validRequest({ existingItems: items(count) })).success;
+    expect(parse(150)).toBe(true);
+    expect(parse(151)).toBe(false);
+  });
+
+  it.each([
+    ['unknown category', { category: 'garden' }],
+    ['empty title', { title: '' }],
+    ['141-char reason', { reason: 'a'.repeat(141) }],
+  ])('rejects an existing item with %s', (_name, overrides) => {
+    const existingItems = [existingItem(overrides)];
+    expect(SuggestRequestSchema.safeParse(validRequest({ existingItems })).success).toBe(false);
   });
 
   it('rejects an invalid nested trip', () => {
@@ -396,7 +418,31 @@ describe('SuggestRequestSchema', () => {
     expect(SuggestRequestSchema.safeParse(validRequest({ trip })).success).toBe(false);
   });
 
-  it('rejects a missing existingTitles', () => {
-    expect(SuggestRequestSchema.safeParse(without(validRequest(), 'existingTitles')).success).toBe(false);
+  it('rejects a missing existingItems', () => {
+    expect(SuggestRequestSchema.safeParse(without(validRequest(), 'existingItems')).success).toBe(false);
+  });
+
+  it('rejects the old existingTitles shape', () => {
+    const old = without(validRequest(), 'existingItems');
+    expect(SuggestRequestSchema.safeParse({ ...old, existingTitles: ['Passport'] }).success).toBe(false);
+  });
+});
+
+describe('SuggestResponseSchema', () => {
+  it('accepts empty items with status empty', () => {
+    expect(SuggestResponseSchema.safeParse({ items: [], status: 'empty' }).success).toBe(true);
+  });
+
+  it('accepts valid items with status ok', () => {
+    const body = { items: [validSuggestion()], status: 'ok' };
+    expect(SuggestResponseSchema.safeParse(body).success).toBe(true);
+  });
+
+  it('rejects an unknown status', () => {
+    expect(SuggestResponseSchema.safeParse({ items: [], status: 'weird' }).success).toBe(false);
+  });
+
+  it('rejects a missing status', () => {
+    expect(SuggestResponseSchema.safeParse({ items: [] }).success).toBe(false);
   });
 });

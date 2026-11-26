@@ -5,12 +5,16 @@ import {
   CATEGORIES,
   type AiSuggestion,
   type SuggestRequest,
+  type SuggestResponse,
 } from '../../src/engine/types.js';
 
 export const GEMINI_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent';
 export const GEMINI_TIMEOUT_MS = 8000;
 export const MAX_AI_ITEMS = 15;
+// Gemini answers 429/503 when it is busy; one quick retry fits inside the 8 s budget.
+export const RETRY_STATUSES: readonly number[] = [429, 503];
+export const RETRY_DELAY_MS = 500;
 
 // Gemini's OpenAPI subset, built from the contract constants so it can't drift.
 export const RESPONSE_SCHEMA = {
@@ -48,8 +52,40 @@ const dayCount = (start: string, end: string): number =>
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+// The rules list grouped by category, as "Title (reason); Title2", so the model can tell what is covered.
+// Titles and reasons come from our own rules, not user input, so they are not fenced like the notes.
+function formatExistingItems(items: SuggestRequest['existingItems']): string[] {
+  const lines = CATEGORIES.flatMap((category) => {
+    const inCategory = items.filter((item) => item.category === category);
+    if (inCategory.length === 0) {return [];}
+    const entries = inCategory.map((item) => (item.reason ? `${item.title} (${item.reason})` : item.title));
+
+    return [`- ${category}: ${entries.join('; ')}`];
+  });
+
+  return lines.length > 0 ? lines : ['(none)'];
+}
+
+const wait = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+
 export function buildPrompt(req: SuggestRequest): string {
-  const { trip, weather, existingTitles } = req;
+  const { trip, weather, existingItems } = req;
   const place = trip.country ? `${trip.city}, ${trip.country}` : trip.city;
   const adults = trip.members.filter((m) => m.kind === 'adult').length;
   const children = trip.members.length - adults;
@@ -81,14 +117,18 @@ export function buildPrompt(req: SuggestRequest): string {
   }
   lines.push(
     '',
-    `Do NOT include any of these: ${existingTitles.length > 0 ? existingTitles.join('; ') : '(none)'}`,
+    'Already on the list (do NOT suggest these, or other names, variants or substitutes for them):',
+    ...formatExistingItems(existingItems),
     '',
     'Rules:',
     `- Return at most ${MAX_AI_ITEMS} items, specific to the destination, season and notes.`,
     '- Each reason is at most 140 characters, or null.',
     `- category must be one of: ${CATEGORIES.join(', ')}.`,
     '- scope: shared = one per group, everyone = one for each traveler, adult = adults only, child = children only.',
-    '- quantity is a whole number from 1 to 10.',
+    '- quantity: for shared it is the total for the group; for everyone/adult/child it is per person (e.g. 1 water bottle each = quantity 1).',
+    '- Use scope adult for phones, electronics, documents and money; use child only for items made for children.',
+    '- Use the traveler notes for specific clothing or gear.',
+    '- Items used in pairs (trekking poles, gloves, shoes) count one per pair.',
   );
 
   return lines.join('\n');
@@ -121,50 +161,63 @@ export function parseGeminiResponse(json: unknown): AiSuggestion[] {
   return items.slice(0, MAX_AI_ITEMS);
 }
 
+const unavailable = (): SuggestResponse => ({ items: [], status: 'unavailable' });
+
 export async function getAiSuggestions(
   req: SuggestRequest,
   apiKey: string | undefined,
   signal?: AbortSignal,
-): Promise<AiSuggestion[]> {
+): Promise<SuggestResponse> {
   if (!apiKey) {
     console.warn('[gemini] no API key');
 
-    return [];
+    return unavailable();
   }
-  if (signal?.aborted) {return [];}
+  if (signal?.aborted) {return unavailable();}
 
   const timeout = AbortSignal.timeout(GEMINI_TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
   try {
-    const response = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: buildPrompt(req) }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA,
-          temperature: 0.4,
-          maxOutputTokens: 1500,
-        },
-      }),
-      signal: combined,
-    });
+    const send = () =>
+      fetch(GEMINI_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: buildPrompt(req) }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: RESPONSE_SCHEMA,
+            temperature: 0.4,
+            maxOutputTokens: 1500,
+          },
+        }),
+        signal: combined,
+      });
+    let response = await send();
+    if (RETRY_STATUSES.includes(response.status)) {
+      console.warn('[gemini] HTTP', response.status, 'retrying');
+      await wait(RETRY_DELAY_MS, combined);
+      response = await send();
+    }
     if (!response.ok) {
       console.warn('[gemini] HTTP', response.status);
 
-      return [];
+      return unavailable();
     }
     const items = parseGeminiResponse(await response.json());
-    if (items.length === 0) {console.warn('[gemini] no valid items');}
+    if (items.length === 0) {
+      console.warn('[gemini] no valid items');
 
-    return items;
+      return { items: [], status: 'empty' };
+    }
+
+    return { items, status: 'ok' };
   } catch (error) {
-    if (signal?.aborted) {return [];}
+    if (signal?.aborted) {return unavailable();}
     const e = error instanceof Error ? error : new Error('unknown');
     console.warn('[gemini] request failed', e.name, e.message);
 
-    return [];
+    return unavailable();
   }
 }

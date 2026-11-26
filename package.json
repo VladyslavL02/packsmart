@@ -10,7 +10,8 @@
     "test": "vitest run --passWithNoTests",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:ai": "tsx scripts/live-check.mts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",

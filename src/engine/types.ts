@@ -76,10 +76,27 @@ export const AiSuggestionSchema = z.object({
   reason: z.string().max(140).nullable(),
 });
 
+// A rules-list item as the AI sees it, so it can avoid duplicates and near-duplicates.
+export const ExistingItemSchema = z.object({
+  title: z.string().min(1).max(60),
+  category: CategorySchema,
+  reason: z.string().max(140).nullable(),
+});
+
+// What /api/suggest reports: 'empty' = Gemini answered with nothing usable,
+// 'unavailable' = it could not be reached (no key, HTTP error, timeout…), so the UI can offer a retry.
+export const AI_STATUSES = ['ok', 'empty', 'unavailable'] as const;
+export const AiStatusSchema = z.enum(AI_STATUSES);
+
 export const SuggestRequestSchema = z.object({
   trip: TripInputSchema,
   weather: WeatherSummarySchema.nullable(),
-  existingTitles: z.array(z.string()).max(150),
+  existingItems: z.array(ExistingItemSchema).max(150),
+});
+
+export const SuggestResponseSchema = z.object({
+  items: z.array(AiSuggestionSchema),
+  status: AiStatusSchema,
 });
 
 export const PackingItemDraftSchema = z.object({
@@ -110,5 +127,7 @@ export type WeatherSummary = z.infer<typeof WeatherSummarySchema>;
 export type AiScope = z.infer<typeof AiScopeSchema>;
 export type AiSuggestion = z.infer<typeof AiSuggestionSchema>;
 export type SuggestRequest = z.infer<typeof SuggestRequestSchema>;
+export type AiStatus = z.infer<typeof AiStatusSchema>;
+export type SuggestResponse = z.infer<typeof SuggestResponseSchema>;
 export type PackingItemDraft = z.infer<typeof PackingItemDraftSchema>;
 export type PackingItem = z.infer<typeof PackingItemSchema>;

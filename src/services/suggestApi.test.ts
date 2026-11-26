@@ -34,6 +34,8 @@ const draft = (overrides: Partial<PackingItemDraft> = {}): PackingItemDraft => (
   ...overrides,
 });
 
+const UNAVAILABLE = { items: [], status: 'unavailable' };
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
 }
@@ -56,22 +58,32 @@ describe('fetchAiSuggestions', () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
         items: [{ title: 'Travel pillow', category: 'misc', scope: 'shared', reason: null }],
+        status: 'ok',
       }),
     );
 
     const result = await fetchAiSuggestions(trip, weather, [draft()]);
 
-    expect(result).toEqual([
-      { title: 'Travel pillow', category: 'misc', scope: 'shared', quantity: 1, reason: null },
-    ]);
+    expect(result).toEqual({
+      items: [
+        { title: 'Travel pillow', category: 'misc', scope: 'shared', quantity: 1, reason: null },
+      ],
+      status: 'ok',
+    });
   });
 
-  it('POSTs trip, weather and deduped existing titles', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ items: [] }));
+  it.each(['empty', 'unavailable'] as const)('passes through the server status %s', async (status) => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [], status }));
+
+    expect(await fetchAiSuggestions(trip, weather, [])).toEqual({ items: [], status });
+  });
+
+  it('POSTs trip, weather and deduped existing items, with no existingTitles', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [], status: 'ok' }));
 
     await fetchAiSuggestions(trip, weather, [
-      draft(),
-      draft({ memberId: 'a2' }),
+      draft({ reason: 'Rainy days' }),
+      draft({ memberId: 'a2', reason: 'other', category: 'misc' }),
       draft({ title: 'Socks' }),
     ]);
 
@@ -80,59 +92,85 @@ describe('fetchAiSuggestions', () => {
     expect(url).toBe('/api/suggest');
     expect(init.method).toBe('POST');
     expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
-    expect(JSON.parse(init.body as string)).toEqual({
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body).toEqual({
       trip,
       weather,
-      existingTitles: ['Rain jacket', 'Socks'],
+      existingItems: [
+        { title: 'Rain jacket', category: 'clothing', reason: 'Rainy days' },
+        { title: 'Socks', category: 'clothing', reason: null },
+      ],
     });
+    expect(body).not.toHaveProperty('existingTitles');
   });
 
-  it('returns [] for a non-JSON 200 body', async () => {
+  it('collapses rows whose titles match after normalizing case and spacing', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [], status: 'ok' }));
+
+    await fetchAiSuggestions(trip, weather, [
+      draft({ title: 'Rain jacket', reason: 'first' }),
+      draft({ title: '  RAIN   jacket ', memberId: 'a2', reason: 'second' }),
+    ]);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { existingItems: { reason: string | null }[] };
+    expect(body.existingItems).toHaveLength(1);
+    expect(body.existingItems[0].reason).toBe('first');
+  });
+
+  it('is unavailable for a non-JSON 200 body', async () => {
     fetchMock.mockResolvedValue(new Response('<!doctype html>', { status: 200 }));
 
-    expect(await fetchAiSuggestions(trip, null, [])).toEqual([]);
+    expect(await fetchAiSuggestions(trip, null, [])).toEqual(UNAVAILABLE);
   });
 
-  it('returns [] on HTTP 500', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ items: [] }, 500));
+  it('is unavailable on HTTP 500', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [], status: 'ok' }, 500));
 
-    expect(await fetchAiSuggestions(trip, weather, [])).toEqual([]);
+    expect(await fetchAiSuggestions(trip, weather, [])).toEqual(UNAVAILABLE);
   });
 
-  it('returns [] when an item has an invalid shape', async () => {
+  it('is unavailable when an item has an invalid shape', async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
         items: [{ title: 'Thing', category: 'nope', scope: 'shared', reason: null }],
+        status: 'ok',
       }),
     );
 
-    expect(await fetchAiSuggestions(trip, weather, [])).toEqual([]);
+    expect(await fetchAiSuggestions(trip, weather, [])).toEqual(UNAVAILABLE);
   });
 
-  it('returns [] when fetch rejects', async () => {
+  it('is unavailable when the server body has no status', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [] }));
+
+    expect(await fetchAiSuggestions(trip, weather, [])).toEqual(UNAVAILABLE);
+  });
+
+  it('is unavailable when fetch rejects', async () => {
     fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
 
-    expect(await fetchAiSuggestions(trip, weather, [])).toEqual([]);
+    expect(await fetchAiSuggestions(trip, weather, [])).toEqual(UNAVAILABLE);
   });
 
-  it('returns [] without fetching when already aborted', async () => {
+  it('is unavailable without fetching when already aborted', async () => {
     const controller = new AbortController();
     controller.abort();
 
-    expect(await fetchAiSuggestions(trip, weather, [], controller.signal)).toEqual([]);
+    expect(await fetchAiSuggestions(trip, weather, [], controller.signal)).toEqual(UNAVAILABLE);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('caps existing titles at 150 so the server never rejects the request', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ items: [] }));
+  it('caps existing items at 150 so the server never rejects the request', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [], status: 'ok' }));
     const many = Array.from({ length: 200 }, (_, i) => draft({ title: `Item ${i}` }));
 
     await fetchAiSuggestions(trip, weather, many);
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(init.body as string) as { existingTitles: string[] };
-    expect(body.existingTitles).toHaveLength(150);
-    expect(body.existingTitles[0]).toBe('Item 0');
+    const body = JSON.parse(init.body as string) as { existingItems: { title: string }[] };
+    expect(body.existingItems).toHaveLength(150);
+    expect(body.existingItems[0].title).toBe('Item 0');
   });
 
   // A fetch that never answers, and rejects like the real one when its signal fires.
@@ -147,7 +185,7 @@ describe('fetchAiSuggestions', () => {
 
   // Fake timers do not drive AbortSignal.timeout (Node owns that timer), so the timeout signal
   // is swapped for one the test fires itself, while still checking the requested duration.
-  it('gives up after the 10 s client timeout and returns []', async () => {
+  it('gives up after the 10 s client timeout and is unavailable', async () => {
     const timeoutController = new AbortController();
     const timeoutSpy = vi
       .spyOn(AbortSignal, 'timeout')
@@ -161,7 +199,7 @@ describe('fetchAiSuggestions', () => {
 
     timeoutController.abort(new DOMException('timed out', 'TimeoutError'));
 
-    expect(await pending).toEqual([]);
+    expect(await pending).toEqual(UNAVAILABLE);
     expect(init.signal?.aborted).toBe(true);
   });
 
@@ -175,7 +213,7 @@ describe('fetchAiSuggestions', () => {
 
     caller.abort();
 
-    expect(await pending).toEqual([]);
+    expect(await pending).toEqual(UNAVAILABLE);
     expect(init.signal?.aborted).toBe(true);
     expect(console.warn).not.toHaveBeenCalled();
   });
@@ -188,7 +226,7 @@ describe('fetchAiSuggestions', () => {
     const pending = fetchAiSuggestions(trip, weather, [], new AbortController().signal);
     timeoutController.abort(new DOMException('timed out', 'TimeoutError'));
 
-    expect(await pending).toEqual([]);
+    expect(await pending).toEqual(UNAVAILABLE);
     expect(console.warn).toHaveBeenCalledTimes(1);
   });
 });

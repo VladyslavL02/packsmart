@@ -7,9 +7,9 @@ export async function POST(request: Request): Promise<Response> {
   const body: unknown = await request.json().catch(() => null);
   const parsed = SuggestRequestSchema.safeParse(body);
   if (!parsed.success) {
-    return Response.json({ items: [] }, { status: 400, headers: HEADERS });
+    return Response.json({ items: [], status: 'unavailable' }, { status: 400, headers: HEADERS });
   }
-  const items = await getAiSuggestions(parsed.data, process.env.GEMINI_API_KEY, request.signal);
+  const result = await getAiSuggestions(parsed.data, process.env.GEMINI_API_KEY, request.signal);
 
-  return Response.json({ items }, { headers: HEADERS });
+  return Response.json(result, { headers: HEADERS });
 }

@@ -866,6 +866,17 @@ describe('second reviewer pass', () => {
     },
   );
 
+  it('sun-cap does not apply on a freezing mountain trip, while sunscreen and sunglasses do', () => {
+    const ctx = ctxFromTrip(
+      trip({ tripType: 'mountains' }),
+      weather({ minTemp: -7, maxTemp: -2 }),
+    );
+
+    expect(appliesIn(findRule(WEATHER_RULES, 'sun-cap'), ctx)).toBe(false);
+    expect(appliesIn(findRule(WEATHER_RULES, 'sunscreen'), ctx)).toBe(true);
+    expect(appliesIn(findRule(WEATHER_RULES, 'sunglasses'), ctx)).toBe(true);
+  });
+
   it('business trips pack half as many t-shirts and one casual bottom', () => {
     const business = (days: number) =>
       directCtx(days, 'standard', { input: trip({ tripType: 'business' }) });
