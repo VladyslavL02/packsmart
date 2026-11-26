@@ -1,24 +1,27 @@
 import { CloudRain, CloudSun } from 'lucide-react';
-import { useState } from 'react';
 import type { WeatherSummary } from '../../engine/types';
-import { Collapse } from '../atoms/Collapse';
 import { Skeleton } from '../atoms/Skeleton';
 
 type WeatherState = 'idle' | 'loading' | WeatherSummary;
 
+const STRIP = 'flex h-8 items-center gap-2 rounded-base bg-surface-container px-3 text-xs';
+
 function content(state: WeatherState) {
-  if (state === 'idle') {return null;}
-  // Same height as the loaded strip, so the swap doesn't move anything.
   if (state === 'loading') {return <Skeleton label="Loading weather" className="h-8" />;}
+  if (state === 'idle') {
+    return (
+      <p className={`${STRIP} text-outline`}>
+        <CloudSun className="size-4 shrink-0" aria-hidden="true" />
+        <span className="truncate">Pick a city and dates to see the weather</span>
+      </p>
+    );
+  }
   const Icon = state.maxPrecipProbability >= 50 ? CloudRain : CloudSun;
 
   return (
-    <p
-      className="flex items-center gap-2 rounded-base bg-surface-container px-3 py-2 text-xs
-        tabular-nums"
-    >
+    <p className={`${STRIP} tabular-nums`}>
       <Icon className="size-4 shrink-0 text-primary" aria-hidden="true" />
-      <span>
+      <span className="truncate">
         {Math.round(state.minTemp)} to {Math.round(state.maxTemp)} °C ·{' '}
         {Math.round(state.maxPrecipProbability)}% rain
         {state.isSeasonalEstimate && <span className="text-outline"> · seasonal estimate</span>}
@@ -27,15 +30,7 @@ function content(state: WeatherState) {
   );
 }
 
+/** Always the same height: hint, skeleton or forecast, so nothing below it moves. */
 export function WeatherStrip({ state }: { state: WeatherState }) {
-  // The last thing shown stays rendered while the strip closes.
-  const [shown, setShown] = useState(state);
-  if (state !== 'idle' && state !== shown) {setShown(state);}
-
-  return (
-    <Collapse open={state !== 'idle'}>
-      {/* The spacing is inside, so a closed strip takes no room at all. */}
-      {shown !== 'idle' && <div className="pt-3 md:pt-2">{content(shown)}</div>}
-    </Collapse>
-  );
+  return <div className="pt-2">{content(state)}</div>;
 }

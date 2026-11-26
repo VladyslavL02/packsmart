@@ -1,6 +1,6 @@
 import { Calendar } from 'lucide-react';
 import { tripDays } from '../../engine/dates';
-import { Collapse } from '../atoms/Collapse';
+import { FieldMessage } from '../atoms/FieldMessage';
 import { TextInput } from '../atoms/TextInput';
 
 type DateRangeFieldsProps = {
@@ -14,6 +14,12 @@ export function DateRangeFields({ startDate, endDate, today, onChange }: DateRan
   const inPast = startDate !== '' && startDate < today;
   const backwards = startDate !== '' && endDate !== '' && endDate < startDate;
   const days = startDate && endDate && !backwards ? tripDays(startDate, endDate) : null;
+  // One line is reserved, so show the first problem only.
+  const error = inPast
+    ? 'The departure date is in the past.'
+    : backwards
+      ? 'The return date is before departure.'
+      : null;
 
   return (
     <div>
@@ -54,12 +60,7 @@ export function DateRangeFields({ startDate, endDate, today, onChange }: DateRan
           />
         </label>
       </div>
-      <Collapse open={inPast}>
-        <p className="pt-1 text-xs text-error">The departure date is in the past.</p>
-      </Collapse>
-      <Collapse open={backwards}>
-        <p className="pt-1 text-xs text-error">The return date is before departure.</p>
-      </Collapse>
+      <FieldMessage tone="error">{error}</FieldMessage>
     </div>
   );
 }

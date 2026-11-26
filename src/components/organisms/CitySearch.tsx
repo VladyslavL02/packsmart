@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { searchCities } from '../../services/weatherApi';
 import type { City } from '../../services/weatherApi';
 import type { TripCity } from '../../engine/tripForm';
-import { Collapse } from '../atoms/Collapse';
+import { FieldMessage } from '../atoms/FieldMessage';
 import { TextInput } from '../atoms/TextInput';
 import { CityOption } from '../molecules/CityOption';
 
@@ -109,15 +109,9 @@ export function CitySearch({ value, onChange }: CitySearchProps) {
           </ul>
         </div>
       </div>
-      <Collapse open={value !== null || noResults}>
-        {/* min-h keeps a height to animate while closing, after the text is gone. */}
-        <p
-          aria-live="polite"
-          className={`min-h-5 pt-1 text-xs ${value ? 'text-on-surface-variant' : 'text-outline'}`}
-        >
-          {value ? region(value) : noResults && 'No cities found'}
-        </p>
-      </Collapse>
+      <FieldMessage tone={value ? 'info' : 'muted'}>
+        {value ? region(value) : noResults ? 'No cities found' : null}
+      </FieldMessage>
     </div>
   );
 }
