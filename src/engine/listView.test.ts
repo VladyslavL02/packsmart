@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { filterItems, groupByCategory, newAiRows, packingProgress } from './listView';
+import {
+  filterCounts,
+  filterItems,
+  groupByCategory,
+  newAiRows,
+  packingProgress,
+  travelersLabel,
+} from './listView';
 import { CATEGORIES } from './types';
-import type { PackingItem, PackingItemDraft } from './types';
+import type { Member, PackingItem, PackingItemDraft } from './types';
 
 // ---------- fixture builders ----------
 
@@ -31,6 +38,10 @@ const sharedItem = (id: string, overrides: Partial<PackingItem> = {}): PackingIt
 const childItem = (id: string, overrides: Partial<PackingItem> = {}): PackingItem =>
   item(id, { scope: 'child', memberId: 'c1', ...overrides });
 
+const adult = (id: string): Member => ({ id, name: `Adult ${id}`, kind: 'adult' });
+
+const child = (id: string): Member => ({ id, name: `Child ${id}`, kind: 'child' });
+
 // ---------- helpers ----------
 
 const ids = (items: PackingItem[]): string[] => items.map((row) => row.id);
@@ -44,6 +55,8 @@ const mixedList = (): PackingItem[] => [
   sharedItem('shared-packed', { isPacked: true }),
   childItem('c1-open'),
 ];
+
+const family = (): Member[] => [adult('a1'), adult('a2'), child('c1')];
 
 // ---------- tests ----------
 
@@ -302,5 +315,97 @@ describe('newAiRows', () => {
     expect(newAiRows([{ title: 'Travel pillow', memberId: null }], [memberRow])).toEqual([
       memberRow,
     ]);
+  });
+});
+
+describe('filterCounts', () => {
+  it('returns zero for every count and every member when the list is empty', () => {
+    expect(filterCounts([], family(), 'a1', false)).toEqual({
+      all: 0,
+      mine: 0,
+      shared: 0,
+      byMember: { a1: 0, a2: 0, c1: 0 },
+    });
+  });
+
+  it('counts rows for all, mine, shared and each member', () => {
+    expect(filterCounts(mixedList(), family(), 'a1', false)).toEqual({
+      all: 7,
+      mine: 4,
+      shared: 2,
+      byMember: { a1: 2, a2: 1, c1: 2 },
+    });
+  });
+
+  it('counts rows rather than quantity', () => {
+    const items = [item('socks', { quantity: 8 }), sharedItem('towel', { quantity: 3 })];
+
+    expect(filterCounts(items, [adult('a1')], 'a1', false)).toEqual({
+      all: 2,
+      mine: 2,
+      shared: 1,
+      byMember: { a1: 1 },
+    });
+  });
+
+  it('counts only shared rows as mine when there is no current member', () => {
+    const counts = filterCounts(mixedList(), family(), null, false);
+
+    expect(counts).toMatchObject({ all: 7, mine: 2, shared: 2 });
+  });
+
+  it('leaves packed rows out of every count when unpackedOnly is set', () => {
+    expect(filterCounts(mixedList(), family(), 'a1', true)).toEqual({
+      all: 4,
+      mine: 2,
+      shared: 1,
+      byMember: { a1: 1, a2: 1, c1: 1 },
+    });
+  });
+
+  it('gives a member with no rows a zero entry', () => {
+    const counts = filterCounts(mixedList(), [...family(), child('c2')], 'a1', false);
+
+    expect(counts.byMember).toEqual({ a1: 2, a2: 1, c1: 2, c2: 0 });
+  });
+
+  it('matches the filterItems result length for every filter', () => {
+    const items = mixedList();
+
+    for (const currentMemberId of ['a1', 'c1', null]) {
+      for (const unpackedOnly of [false, true]) {
+        const size = (filter: Parameters<typeof filterItems>[1]): number =>
+          filterItems(items, filter, currentMemberId, unpackedOnly).length;
+
+        expect(filterCounts(items, family(), currentMemberId, unpackedOnly)).toEqual({
+          all: size('all'),
+          mine: size('mine'),
+          shared: size('shared'),
+          byMember: {
+            a1: size({ memberId: 'a1' }),
+            a2: size({ memberId: 'a2' }),
+            c1: size({ memberId: 'c1' }),
+          },
+        });
+      }
+    }
+  });
+});
+
+describe('travelersLabel', () => {
+  it('shows the total with adult and kid counts for a mixed trip', () => {
+    expect(travelersLabel(family())).toBe('3 travelers (2A, 1K)');
+  });
+
+  it('uses the singular for one traveler', () => {
+    expect(travelersLabel([adult('a1')])).toBe('1 traveler (1A)');
+  });
+
+  it('omits the adult group for a kids-only trip', () => {
+    expect(travelersLabel([child('c1'), child('c2')])).toBe('2 travelers (2K)');
+  });
+
+  it('omits the kid group for an adults-only trip', () => {
+    expect(travelersLabel([adult('a1'), adult('a2')])).toBe('2 travelers (2A)');
   });
 });

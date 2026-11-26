@@ -31,6 +31,9 @@ export const StoredTripSchema = TripInputSchema.and(
 );
 export type StoredTrip = z.infer<typeof StoredTripSchema>;
 
+/** A huge quantity fails the schema on reload, which would discard every trip. */
+export const MAX_QUANTITY = 99;
+
 export const AI_STORE_STATUSES = ['loading', ...AI_STATUSES] as const;
 export type AiStoreStatus = (typeof AI_STORE_STATUSES)[number];
 
@@ -138,7 +141,9 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
 
           setQuantity: (tripId, itemId, quantity) => {
             // NaN and Infinity save as null, which would discard every trip on reload.
-            const clamped = Number.isFinite(quantity) ? Math.max(1, Math.round(quantity)) : 1;
+            const clamped = Number.isFinite(quantity)
+              ? Math.min(MAX_QUANTITY, Math.max(1, Math.round(quantity)))
+              : 1;
             updateItem(tripId, itemId, (item) => ({ ...item, quantity: clamped }));
           },
 

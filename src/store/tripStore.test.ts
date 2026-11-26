@@ -120,6 +120,9 @@ describe('tripStore', () => {
     [Number.NaN, 1],
     [Number.POSITIVE_INFINITY, 1],
     [4, 4],
+    [99, 99],
+    [100, 99],
+    [1e20, 99],
   ])('stores quantity %s as %s and keeps the source', (input, expected) => {
     const { store, tripId, rows } = setup();
     const { id } = rows()[0];
@@ -389,5 +392,19 @@ describe('tripStore', () => {
 
     expect(reopened.getState().trips[tripId]).toEqual(store.getState().trips[tripId]);
     expect(reopened.getState().items[tripId]).toEqual(rows());
+  });
+
+  it('keeps the trip and its items after reload when a huge quantity was set', () => {
+    const { mem, store, tripId, rows } = setup();
+    const before = rows();
+
+    store.getState().setQuantity(tripId, before[0].id, 1e20);
+    const reopened = createTripStore(() => mem.storage);
+
+    expect(reopened.getState().trips[tripId]).toEqual(store.getState().trips[tripId]);
+    expect(reopened.getState().items[tripId]).toEqual([
+      { ...before[0], quantity: 99 },
+      ...before.slice(1),
+    ]);
   });
 });

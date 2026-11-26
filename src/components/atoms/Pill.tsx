@@ -4,6 +4,7 @@ const TONES = {
   primary: 'bg-primary-container/15 text-primary',
   secondary: 'bg-secondary-container/40 text-on-secondary-container',
   neutral: 'bg-surface-container-high text-on-surface',
+  ai: 'border border-secondary/30 bg-secondary-container/40 text-on-secondary-container',
 };
 
 type PillProps = ComponentProps<'span'> & { tone?: keyof typeof TONES };

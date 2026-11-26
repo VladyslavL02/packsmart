@@ -1,9 +1,15 @@
 import { normalizeTitle } from './generator';
 import { CATEGORIES } from './types';
-import type { Category, PackingItem, PackingItemDraft } from './types';
+import type { Category, Member, PackingItem, PackingItemDraft } from './types';
 
 export type ItemFilter = 'all' | 'mine' | 'shared' | { memberId: string };
 export type Ratio = { packed: number; total: number };
+export type FilterCounts = {
+  all: number;
+  mine: number;
+  shared: number;
+  byMember: Record<string, number>;
+};
 export type PackingProgress = Ratio & {
   percent: number;
   shared: Ratio;
@@ -73,4 +79,32 @@ export function newAiRows(
   const existing = new Set(current.map(titleAndOwner));
 
   return merged.filter((item) => item.source === 'ai' && !existing.has(titleAndOwner(item)));
+}
+
+/** The number of rows each filter chip would show. */
+export function filterCounts(
+  items: PackingItem[],
+  members: Member[],
+  currentMemberId: string | null,
+  unpackedOnly: boolean,
+): FilterCounts {
+  const count = (filter: ItemFilter) =>
+    filterItems(items, filter, currentMemberId, unpackedOnly).length;
+
+  return {
+    all: count('all'),
+    mine: count('mine'),
+    shared: count('shared'),
+    byMember: Object.fromEntries(members.map(({ id }) => [id, count({ memberId: id })])),
+  };
+}
+
+/** "3 travelers (2A, 1K)" */
+export function travelersLabel(members: Member[]): string {
+  const adults = members.filter((member) => member.kind === 'adult').length;
+  const kids = members.length - adults;
+  const groups = [adults > 0 ? `${adults}A` : null, kids > 0 ? `${kids}K` : null];
+  const noun = members.length === 1 ? 'traveler' : 'travelers';
+
+  return `${members.length} ${noun} (${groups.filter(Boolean).join(', ')})`;
 }

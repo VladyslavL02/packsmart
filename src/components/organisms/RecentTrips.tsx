@@ -1,17 +1,11 @@
 import { useMemo } from 'react';
 import { packingProgress } from '../../engine/listView';
+import { formatDateRange } from '../../lib/format';
 import { TRIP_TYPE_META } from '../../lib/tripMeta';
 import { useTripStore } from '../../store/tripStore';
 import { RecentTripRow } from '../molecules/RecentTripRow';
 
 const MAX_SHOWN = 5;
-
-// Dates are date-only strings (read as UTC), so format them in UTC too.
-const DATE_RANGE = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: 'numeric',
-  timeZone: 'UTC',
-});
 
 export function RecentTrips() {
   const trips = useTripStore((state) => state.trips);
@@ -37,7 +31,7 @@ export function RecentTrips() {
             to={`/trip/${trip.id}`}
             icon={TRIP_TYPE_META[trip.tripType].icon}
             city={trip.city}
-            dates={DATE_RANGE.formatRange(new Date(trip.startDate), new Date(trip.endDate))}
+            dates={formatDateRange(trip.startDate, trip.endDate)}
             itemCount={progress.total}
             percent={progress.percent}
           />

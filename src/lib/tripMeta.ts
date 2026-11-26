@@ -1,7 +1,8 @@
 import { Backpack, Briefcase, BriefcaseBusiness, Building2 } from 'lucide-react';
 import { Luggage, Mountain, Umbrella } from 'lucide-react';
+import { Baby, FileText, HeartPulse, Package, Plug, Shirt, SprayCan } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { LuggageType, TripType } from '../engine/types';
+import type { Category, LuggageType, TripType } from '../engine/types';
 
 // A full Record: a new trip type without a card here fails typecheck. /add-trip-preset adds to it.
 export const TRIP_TYPE_META: Record<
@@ -18,4 +19,14 @@ export const LUGGAGE_ICONS: Record<LuggageType, LucideIcon> = {
   personal: Backpack,
   carryOn: BriefcaseBusiness,
   checked: Luggage,
+};
+
+export const CATEGORY_META: Record<Category, { label: string; icon: LucideIcon }> = {
+  clothing: { label: 'Clothing', icon: Shirt },
+  toiletries: { label: 'Toiletries', icon: SprayCan },
+  documents: { label: 'Documents', icon: FileText },
+  electronics: { label: 'Electronics', icon: Plug },
+  health: { label: 'Health', icon: HeartPulse },
+  kids: { label: 'Kids', icon: Baby },
+  misc: { label: 'Other', icon: Package },
 };

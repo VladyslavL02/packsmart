@@ -7,13 +7,15 @@ type StepperProps = {
   /** What is being counted, for the button labels: "Decrease Adults". */
   label: string;
   onChange: (value: number) => void;
+  /** How the number is shown, e.g. "×3". */
+  format?: (value: number) => string;
 };
 
 const BUTTON = `flex size-7 items-center justify-center rounded-sm bg-surface-container-high
   text-on-surface hover:bg-surface-container-highest disabled:cursor-not-allowed
   disabled:opacity-40`;
 
-export function Stepper({ value, min, max, label, onChange }: StepperProps) {
+export function Stepper({ value, min, max, label, onChange, format = String }: StepperProps) {
   return (
     <div className="flex items-center gap-2">
       <button
@@ -25,7 +27,9 @@ export function Stepper({ value, min, max, label, onChange }: StepperProps) {
       >
         <Minus className="size-4" aria-hidden="true" />
       </button>
-      <span className="min-w-5 text-center text-sm font-medium tabular-nums">{value}</span>
+      <span className="min-w-5 text-center text-sm font-medium tabular-nums">
+        {format(value)}
+      </span>
       <button
         type="button"
         className={BUTTON}
