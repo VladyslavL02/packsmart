@@ -24,7 +24,7 @@ export function ItemRow({
   onDelete,
 }: ItemRowProps) {
   return (
-    <li className="flex items-start gap-3 px-3 py-3 hover:bg-surface-container-high">
+    <li className="flex items-start gap-3 px-3 py-3 hover:bg-surface-container">
       <Checkbox
         className="mt-0.5"
         checked={item.isPacked}
