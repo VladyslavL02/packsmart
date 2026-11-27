@@ -7,6 +7,14 @@ Currently, two official plugins are available:
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
 - [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
+## Setup
+
+Set these in `.env.local` (never commit it):
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `GEMINI_API_KEY` (server only, used by `api/suggest.ts`)
+
 ## Data access & security
 
 PackSmart has no sign-in. A trip is reached through its unguessable link (the trip's random uuid), so access is "anyone with the link", not real scoping by user or `trip_id`.
