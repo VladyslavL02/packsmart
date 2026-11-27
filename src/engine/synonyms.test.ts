@@ -64,7 +64,7 @@ describe('isSameItem: real Gemini titles', () => {
     ['Sun hat with chin strap', 'sun-cap', 'Cap'],
     ['Thermos flask', 'water-bottle', 'Water bottle'],
     ['Sun cream', 'sunscreen', 'Sunscreen'],
-    ['Travel insurance details', 'tickets-booking', 'Tickets & booking confirmations'],
+    ['Travel insurance details', 'travel-insurance', 'Travel insurance'],
   ])('drops %s as a duplicate of %s', (aiTitle, key, title) => {
     expect(isSameItem(aiTitle, base(key, title))).toBe(true);
   });
@@ -74,14 +74,32 @@ describe('isSameItem: real Gemini titles', () => {
     ['Motion sickness pills', 'medications', 'Medications'],
     ['Rash guard', 'swimwear', 'Swimwear'],
     ['Balaclava', 'warm-hat', 'Warm hat'],
+    ['Travel insurance details', 'tickets-booking', 'Tickets & booking confirmations'],
   ])('keeps %s against %s', (aiTitle, key, title) => {
     expect(isSameItem(aiTitle, base(key, title))).toBe(false);
   });
 });
 
 describe('RULE_SYNONYMS', () => {
-  it('includes travel insurance for tickets-booking', () => {
-    expect(RULE_SYNONYMS['tickets-booking']).toContain('travel insurance');
+  it('moves travel insurance from tickets-booking to travel-insurance', () => {
+    expect(RULE_SYNONYMS['tickets-booking']).not.toContain('travel insurance');
+    expect(RULE_SYNONYMS['travel-insurance']).toContain('travel insurance');
+  });
+
+  it('moves the clear-zip-bag phrases to liquids-kit', () => {
+    expect(RULE_SYNONYMS['clear-zip-bag']).toBeUndefined();
+    expect(RULE_SYNONYMS['liquids-kit']).toEqual(
+      expect.arrayContaining(['ziplock bag', 'zip lock bag', 'toiletry bag', 'quart bag']),
+    );
+  });
+
+  it.each([
+    ['trousers', ['pants', 'jeans']],
+    ['closed-shoes', ['trainers', 'sneakers', 'walking shoes', 'comfortable shoes']],
+    ['hand-sanitizer', ['sanitizer', 'sanitiser', 'hand gel']],
+    ['drivers-licence', ['driving licence', 'driving license', "driver's license", 'drivers license']],
+  ])('has the new synonyms for %s', (key, phrases) => {
+    expect(RULE_SYNONYMS[key]).toEqual(expect.arrayContaining(phrases));
   });
 
   it.each(Object.keys(RULE_SYNONYMS))('%s is a key of an existing rule', (key) => {

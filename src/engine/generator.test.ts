@@ -77,11 +77,15 @@ describe('generateBasePackingList', () => {
   describe('solo adult city trip with dry weather', () => {
     const items = generateBasePackingList(tripOfDays(3), weather());
 
-    it('includes liquids-kit, clear-zip-bag and walking-shoes', () => {
+    it('includes liquids-kit and walking-shoes', () => {
       const keys = keysIn(items);
       expect(keys).toContain('liquids-kit');
-      expect(keys).toContain('clear-zip-bag');
       expect(keys).toContain('walking-shoes');
+    });
+
+    it('has exactly one liquids row', () => {
+      const rows = items.filter((item) => /liquids|zip bag/i.test(item.title));
+      expect(rows.map((r) => r.key)).toEqual(['liquids-kit']);
     });
 
     it('has no umbrella and no carry-on-spare-outfit', () => {
@@ -242,6 +246,7 @@ describe('generateBasePackingList', () => {
       'sunscreen',
       'sunglasses',
       'sun-cap',
+      'hand-sanitizer',
     ];
 
     it('produces no weather-rule keys on a city trip', () => {
@@ -299,6 +304,37 @@ describe('generateBasePackingList', () => {
       expect(items.length).toBeGreaterThan(0);
       expect(items.every((i) => i.source === 'rules')).toBe(true);
     });
+  });
+});
+
+describe('rules quality pass', () => {
+  const family = members(2, 1);
+
+  it('replaces trousers / shorts with trousers on a freezing trip', () => {
+    const keys = keysIn(generateBasePackingList(trip(), weather({ minTemp: -3, maxTemp: 4 })));
+    expect(keys).toContain('trousers');
+    expect(keys).not.toContain('bottoms');
+  });
+
+  it('gives one shared travel-insurance row for a family', () => {
+    const items = generateBasePackingList(trip({ members: family }), weather());
+    expect(rowsFor(items, 'travel-insurance').map((r) => r.memberId)).toEqual([null]);
+  });
+
+  it('gives a drivers-licence row to each adult and none to the child', () => {
+    const items = generateBasePackingList(
+      trip({ tripType: 'mountains', members: family }),
+      weather(),
+    );
+    expect(rowsFor(items, 'drivers-licence').map((r) => r.memberId)).toEqual(['a1', 'a2']);
+  });
+
+  it('scales sunscreen with the number of travelers, counting children fully', () => {
+    const items = generateBasePackingList(
+      trip({ tripType: 'beach', members: family }),
+      weather(),
+    );
+    expect(rowsFor(items, 'sunscreen').map((r) => r.quantity)).toEqual([3]);
   });
 });
 

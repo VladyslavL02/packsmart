@@ -35,8 +35,11 @@ export const HEAT_MIN = 27;
 export function deriveWeatherFlags(weather: WeatherSummary | null): WeatherFlags {
   if (!weather) {return { rain: false, cold: false, freezing: false, heat: false };}
 
+  // A day that never rises above freezing brings snow, not rain.
+  const thaws = weather.maxTemp > FREEZING_MAX;
+
   return {
-    rain: weather.rainDays >= 1 || weather.maxPrecipProbability >= RAIN_PROB_THRESHOLD,
+    rain: thaws && (weather.rainDays >= 1 || weather.maxPrecipProbability >= RAIN_PROB_THRESHOLD),
     cold: weather.minTemp <= COLD_MAX,
     freezing: weather.minTemp <= FREEZING_MAX,
     heat: weather.maxTemp >= HEAT_MIN,
@@ -124,6 +127,23 @@ function washesNeeded(ctx: RuleContext): number {
 
 const underwearQuantity = (ctx: RuleContext) => Math.min(ctx.days + 1, underwearCap(ctx));
 
+const warmSocksQuantity = (ctx: RuleContext) => Math.min(ctx.days, 3);
+
+// Flip-flop days on hot or beach trips halve the socks (hiking still needs them), and warm socks
+// replace some pairs when freezing.
+const socksQuantity = (ctx: RuleContext) => {
+  const barefootDays =
+    ctx.input.tripType !== 'mountains' && (ctx.input.tripType === 'beach' || ctx.flags.heat);
+  const base = barefootDays ? Math.ceil(underwearQuantity(ctx) / 2) : underwearQuantity(ctx);
+
+  return ctx.flags.freezing ? Math.max(1, base - warmSocksQuantity(ctx)) : base;
+};
+
+// Bottoms can be worn several times: one per ~3 days plus one, never more than 4.
+// On business trips the formal outfits cover most days, so one casual pair is enough.
+const bottomsQuantity = (ctx: RuleContext) =>
+  ctx.input.tripType === 'business' ? 1 : Math.min(Math.ceil(ctx.days / 3) + 1, 4);
+
 const rainReason = (ctx: RuleContext) =>
   withSeasonalNote(
     ctx,
@@ -160,6 +180,13 @@ const onlyWithBags = (ctx: RuleContext) =>
 
 export const BASE_RULES: Rule[] = [
   { key: 'passport-id', title: 'Passport / ID', category: 'documents', appliesTo: 'everyone' },
+  {
+    key: 'travel-insurance',
+    title: 'Travel insurance',
+    category: 'documents',
+    appliesTo: 'shared',
+    reason: 'Medical cover and cancellations',
+  },
   { key: 'wallet-cards', title: 'Wallet, cards & cash', category: 'documents', appliesTo: 'adult' },
   {
     key: 'tickets-booking',
@@ -187,7 +214,7 @@ export const BASE_RULES: Rule[] = [
     title: 'Socks',
     category: 'clothing',
     appliesTo: 'everyone',
-    quantity: underwearQuantity,
+    quantity: socksQuantity,
   },
   {
     key: 't-shirts',
@@ -195,10 +222,12 @@ export const BASE_RULES: Rule[] = [
     category: 'clothing',
     appliesTo: 'everyone',
     // Business trips mostly wear formal outfits, so casual tops are halved.
+    // When freezing they are only a base under warm layers, so three are enough.
     quantity: (ctx) =>
       Math.min(
         ctx.input.tripType === 'business' ? Math.ceil(ctx.days / 2) : ctx.days,
         CLOTHING_CAPS[ctx.packingCapacity].tshirts,
+        ctx.flags.freezing ? 3 : Infinity,
       ),
   },
   {
@@ -206,10 +235,17 @@ export const BASE_RULES: Rule[] = [
     title: 'Trousers / shorts',
     category: 'clothing',
     appliesTo: 'everyone',
-    // Bottoms can be worn several times: one per ~3 days plus one, never more than 4.
-    // On business trips the formal outfits cover most days, so one casual pair is enough.
-    quantity: (ctx) =>
-      ctx.input.tripType === 'business' ? 1 : Math.min(Math.ceil(ctx.days / 3) + 1, 4),
+    quantity: bottomsQuantity,
+    when: (ctx) => !ctx.flags.freezing,
+  },
+  {
+    key: 'trousers',
+    title: 'Trousers',
+    category: 'clothing',
+    appliesTo: 'everyone',
+    quantity: (ctx) => Math.min(bottomsQuantity(ctx), 3),
+    when: (ctx) => ctx.flags.freezing,
+    reason: (ctx) => freezingReason(ctx),
   },
   { key: 'sleepwear', title: 'Sleepwear', category: 'clothing', appliesTo: 'everyone' },
   { key: 'medications', title: 'Medications', category: 'health', appliesTo: 'everyone' },
@@ -295,7 +331,7 @@ export const WEATHER_RULES: Rule[] = [
     title: 'Warm socks',
     category: 'clothing',
     appliesTo: 'everyone',
-    quantity: (ctx) => Math.min(ctx.days, 3),
+    quantity: warmSocksQuantity,
     when: (ctx) => ctx.flags.freezing,
     reason: freezingReason,
   },
@@ -303,7 +339,7 @@ export const WEATHER_RULES: Rule[] = [
     key: 'lip-balm',
     title: 'Lip balm',
     category: 'toiletries',
-    appliesTo: 'shared',
+    appliesTo: 'everyone',
     when: (ctx) => ctx.flags.cold,
     reason: coldReason,
   },
@@ -336,10 +372,19 @@ export const WEATHER_RULES: Rule[] = [
     title: 'Sunscreen',
     category: 'toiletries',
     appliesTo: 'shared',
-    // One bottle lasts about a week of daily use.
-    quantity: (ctx) => Math.max(1, Math.ceil(ctx.days / 7)),
+    // One bottle lasts about 10 person-days; more than four is better bought there.
+    quantity: (ctx) =>
+      Math.min(Math.max(1, Math.ceil((ctx.days * ctx.input.members.length) / 10)), 4),
     when: needsSunProtection,
     reason: sunReason,
+  },
+  {
+    key: 'hand-sanitizer',
+    title: 'Hand sanitizer',
+    category: 'toiletries',
+    appliesTo: 'shared',
+    when: (ctx) => ctx.flags.heat,
+    reason: heatReason,
   },
   {
     key: 'sunglasses',
@@ -367,10 +412,15 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
       title: 'Comfortable walking shoes',
       category: 'clothing',
       appliesTo: 'everyone',
-      reason: (ctx) =>
-        ctx.flags.rain || ctx.flags.cold
+      reason: (ctx) => {
+        if (ctx.flags.freezing) {
+          return 'City trips mean a lot of walking: bring a warm, waterproof pair with good grip';
+        }
+
+        return ctx.flags.rain || ctx.flags.cold
           ? 'City trips mean a lot of walking: bring a waterproof pair'
-          : 'City trips mean a lot of walking',
+          : 'City trips mean a lot of walking';
+      },
     },
     { key: 'day-bag', title: 'Day bag', category: 'misc', appliesTo: 'everyone' },
   ],
@@ -378,7 +428,21 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
     { key: 'hiking-boots', title: 'Hiking boots', category: 'clothing', appliesTo: 'everyone' },
     { key: 'fleece', title: 'Fleece', category: 'clothing', appliesTo: 'everyone' },
     { key: 'water-bottle', title: 'Water bottle', category: 'misc', appliesTo: 'everyone' },
+    {
+      key: 'hiking-daypack',
+      title: 'Daypack',
+      category: 'misc',
+      appliesTo: 'adult',
+      reason: 'Carries water and layers on hikes',
+    },
     { key: 'headlamp', title: 'Headlamp', category: 'electronics', appliesTo: 'shared' },
+    {
+      key: 'drivers-licence',
+      title: "Driver's licence",
+      category: 'documents',
+      appliesTo: 'adult',
+      reason: 'Mountain areas are often easiest to reach by car',
+    },
   ],
   beach: [
     {
@@ -391,6 +455,13 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
     },
     { key: 'beach-towel', title: 'Beach towel', category: 'misc', appliesTo: 'everyone' },
     { key: 'flip-flops', title: 'Flip-flops', category: 'clothing', appliesTo: 'everyone' },
+    {
+      key: 'closed-shoes',
+      title: 'Closed shoes',
+      category: 'clothing',
+      appliesTo: 'everyone',
+      reason: 'For temples, towns and day trips',
+    },
     { key: 'after-sun', title: 'After-sun lotion', category: 'toiletries', appliesTo: 'shared' },
     {
       key: 'insect-repellent',
@@ -420,19 +491,11 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
 export const LUGGAGE_RULES: Rule[] = [
   {
     key: 'liquids-kit',
-    title: '100 ml liquids kit',
+    title: 'Liquids kit (100 ml bottles + clear zip bag)',
     category: 'toiletries',
     appliesTo: 'shared',
     when: (ctx) => !hasLuggage(ctx, 'checked'),
-    reason: 'No checked bag: liquids must fit carry-on limits',
-  },
-  {
-    key: 'clear-zip-bag',
-    title: 'Clear zip bag',
-    category: 'toiletries',
-    appliesTo: 'shared',
-    when: (ctx) => !hasLuggage(ctx, 'checked'),
-    reason: 'No checked bag: liquids go through security in a clear bag',
+    reason: 'No checked bag: liquids up to 100 ml each, in one clear bag',
   },
   {
     key: 'carry-on-spare-outfit',

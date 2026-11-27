@@ -425,7 +425,7 @@ describe('WEATHER_RULES', () => {
     ['rain', ['rain-jacket', 'umbrella']],
     ['cold', ['warm-jacket', 'sweater']],
     ['freezing', ['gloves', 'warm-hat', 'thermal-layer']],
-    ['heat', ['sunscreen', 'sunglasses', 'sun-cap']],
+    ['heat', ['sunscreen', 'sunglasses', 'sun-cap', 'hand-sanitizer']],
   ];
 
   describe.each(GROUPS)('%s flag', (flag, keys) => {
@@ -504,12 +504,26 @@ describe('WEATHER_RULES', () => {
 });
 
 describe('LUGGAGE_RULES', () => {
-  describe.each(['liquids-kit', 'clear-zip-bag'])('%s', (key) => {
-    const rule = findRule(LUGGAGE_RULES, key);
+  it('no longer has a separate clear-zip-bag rule', () => {
+    expect(keysOf(LUGGAGE_RULES)).not.toContain('clear-zip-bag');
+  });
+
+  describe('liquids-kit', () => {
+    const rule = findRule(LUGGAGE_RULES, 'liquids-kit');
 
     it('is a shared toiletries rule', () => {
       expect(rule.appliesTo).toBe('shared');
       expect(rule.category).toBe('toiletries');
+    });
+
+    it('is titled as a kit that includes the clear zip bag', () => {
+      expect(rule.title).toBe('Liquids kit (100 ml bottles + clear zip bag)');
+    });
+
+    it('explains the 100 ml and one clear bag limit', () => {
+      expect(reasonOf(rule, luggageCtx([entry('carryOn')]))).toBe(
+        'No checked bag: liquids up to 100 ml each, in one clear bag',
+      );
     });
 
     it('applies with carryOn only', () => {
@@ -589,7 +603,7 @@ describe('FAMILY_RULES', () => {
 describe('TRIP_TYPE_RULES', () => {
   const EXPECTED: Record<string, string[]> = {
     city: ['walking-shoes', 'day-bag'],
-    mountains: ['hiking-boots', 'fleece', 'water-bottle', 'headlamp'],
+    mountains: ['hiking-boots', 'fleece', 'water-bottle', 'headlamp', 'drivers-licence', 'hiking-daypack'],
     beach: [
       'swimwear',
       'beach-towel',
@@ -597,6 +611,7 @@ describe('TRIP_TYPE_RULES', () => {
       'after-sun',
       'insect-repellent',
       'beach-bag',
+      'closed-shoes',
     ],
     business: [
       'formal-outfit',
@@ -644,7 +659,7 @@ describe('BASE_RULES', () => {
     'sleepwear',
     'medications',
   ];
-  const SHARED = ['power-bank', 'toothpaste', 'first-aid-kit', 'laundry-kit'];
+  const SHARED = ['power-bank', 'toothpaste', 'first-aid-kit', 'laundry-kit', 'travel-insurance'];
 
   it('contains every expected key', () => {
     expect(keysOf(BASE_RULES)).toEqual(expect.arrayContaining([...EVERYONE, ...SHARED]));
@@ -832,9 +847,9 @@ describe('second reviewer pass', () => {
     expect(appliesIn(rule, ctxFromTrip(trip(), cold))).toBe(false);
   });
 
-  it('lip balm applies when cold, as one shared item', () => {
+  it('lip balm applies when cold, one per person', () => {
     const rule = findRule(WEATHER_RULES, 'lip-balm');
-    expect(rule.appliesTo).toBe('shared');
+    expect(rule.appliesTo).toBe('everyone');
     expect(appliesIn(rule, ctxFromTrip(trip(), cold))).toBe(true);
     expect(appliesIn(rule, ctxFromTrip(trip(), weather()))).toBe(false);
   });
@@ -845,17 +860,27 @@ describe('second reviewer pass', () => {
     expect(quantityOf(rule, directCtx(10, 'standard'))).toBe(3);
   });
 
+  // One bottle per 10 person-days, between 1 and 4.
   it.each([
-    [1, 1],
-    [7, 1],
-    [8, 2],
-    [14, 2],
-    [15, 3],
-  ])('sunscreen for a %s-day trip is %s bottle(s)', (days, expected) => {
-    expect(quantityOf(findRule(WEATHER_RULES, 'sunscreen'), directCtx(days, 'standard'))).toBe(
-      expected,
-    );
-  });
+    [1, 1, 0, 1],
+    [7, 1, 0, 1],
+    [10, 1, 0, 1],
+    [11, 1, 0, 2],
+    [14, 1, 0, 2],
+    [21, 1, 0, 3],
+    [7, 3, 0, 3],
+    [7, 1, 2, 3],
+    [14, 4, 0, 4],
+    [30, 2, 2, 4],
+  ])(
+    'sunscreen for %s days, %s adult(s) and %s child(ren) is %s bottle(s)',
+    (days, adults, children, expected) => {
+      const ctx = directCtx(days, 'standard', {
+        input: trip({ members: members(adults, children) }),
+      });
+      expect(quantityOf(findRule(WEATHER_RULES, 'sunscreen'), ctx)).toBe(expected);
+    },
+  );
 
   it.each(['sunscreen', 'sunglasses', 'sun-cap'])(
     '%s applies on a mild mountain trip, citing altitude',
@@ -891,6 +916,182 @@ describe('second reviewer pass', () => {
     expect(reasonOf(shoes, ctxFromTrip(trip(), rainy))).toContain('waterproof');
     expect(reasonOf(shoes, ctxFromTrip(trip(), cold))).toContain('waterproof');
     expect(reasonOf(shoes, ctxFromTrip(trip(), weather()))).not.toContain('waterproof');
+  });
+});
+
+describe('rules quality pass', () => {
+  // minTemp 0 and maxTemp 27 are the exact freezing and heat thresholds.
+  const freezing = weather({ minTemp: 0, maxTemp: 5 });
+  const hot = weather({ minTemp: 18, maxTemp: 27 });
+  const mild = weather();
+  const freezingHot = weather({ minTemp: 0, maxTemp: 27 });
+
+  // Standard capacity (carry-on, solo): underwear cap 7, t-shirt cap 5.
+  const quantityOn = (
+    key: string,
+    days: number,
+    w: WeatherSummary | null,
+    overrides: Partial<TripInput> = {},
+  ): number =>
+    quantityOf(findRule(BASE_RULES, key), ctxFromTrip(tripOfDays(days, overrides), w));
+
+  describe('socks', () => {
+    it.each([
+      [7, 4],
+      [5, 3],
+    ])('halves the %s-day underwear base, rounding up, in heat', (days, expected) => {
+      expect(quantityOn('socks', days, hot)).toBe(expected);
+    });
+
+    it.each<[string, WeatherSummary | null]>([
+      ['mild weather', mild],
+      ['no weather', null],
+    ])('is halved on a beach trip with %s', (_label, w) => {
+      expect(quantityOn('socks', 7, w, { tripType: 'beach' })).toBe(4);
+    });
+
+    it('is not halved on a mountain trip in heat', () => {
+      expect(quantityOn('socks', 7, hot, { tripType: 'mountains' })).toBe(7);
+    });
+
+    it.each([
+      [1, 1],
+      [2, 1],
+      [4, 2],
+      [7, 4],
+      [13, 4],
+    ])('subtracts the warm socks when freezing: %s days is %s', (days, expected) => {
+      expect(quantityOn('socks', days, freezing)).toBe(expected);
+    });
+
+    it('subtracts the warm socks after halving on a freezing beach trip', () => {
+      expect(quantityOn('socks', 7, freezing, { tripType: 'beach' })).toBe(1);
+    });
+
+    it('never drops below 1 pair', () => {
+      expect(quantityOn('socks', 4, freezingHot)).toBe(1);
+    });
+
+    it('leaves underwear unchanged by heat', () => {
+      expect(quantityOn('underwear', 7, hot)).toBe(7);
+    });
+  });
+
+  describe('t-shirts', () => {
+    it('is capped at 3 when freezing', () => {
+      expect(quantityOn('t-shirts', 13, freezing)).toBe(3);
+    });
+
+    it('stays under 3 on a short freezing trip', () => {
+      expect(quantityOn('t-shirts', 2, freezing)).toBe(2);
+    });
+
+    it('is capped at 3 on a long freezing business trip', () => {
+      expect(quantityOn('t-shirts', 13, freezing, { tripType: 'business' })).toBe(3);
+    });
+  });
+
+  describe('bottoms and trousers', () => {
+    const applies = (key: string, w: WeatherSummary | null): boolean =>
+      appliesIn(findRule(BASE_RULES, key), ctxFromTrip(trip(), w));
+
+    it('drops bottoms when freezing', () => {
+      expect(applies('bottoms', freezing)).toBe(false);
+    });
+
+    it.each<[string, WeatherSummary | null]>([
+      ['mild weather', mild],
+      ['no weather', null],
+    ])('keeps bottoms with %s', (_label, w) => {
+      expect(applies('bottoms', w)).toBe(true);
+    });
+
+    it('defines trousers as an everyone clothing rule', () => {
+      expect(findRule(BASE_RULES, 'trousers')).toMatchObject({
+        title: 'Trousers',
+        category: 'clothing',
+        appliesTo: 'everyone',
+      });
+    });
+
+    it('applies trousers when freezing', () => {
+      expect(applies('trousers', freezing)).toBe(true);
+    });
+
+    it.each<[string, WeatherSummary | null]>([
+      ['cold but above freezing', weather({ minTemp: 1 })],
+      ['mild weather', mild],
+      ['no weather', null],
+    ])('does not apply trousers with %s', (_label, w) => {
+      expect(applies('trousers', w)).toBe(false);
+    });
+
+    it('cites the low temperature in the trousers reason', () => {
+      const ctx = ctxFromTrip(trip(), weather({ minTemp: -6 }));
+      expect(reasonOf(findRule(BASE_RULES, 'trousers'), ctx)).toContain('-6');
+    });
+
+    it.each([
+      [1, 2],
+      [3, 2],
+      [4, 3],
+      [13, 3],
+    ])('packs trousers like bottoms, capped at 3: %s days is %s', (days, expected) => {
+      expect(quantityOn('trousers', days, freezing)).toBe(expected);
+    });
+
+    it('packs one pair of trousers on a freezing business trip', () => {
+      expect(quantityOn('trousers', 10, freezing, { tripType: 'business' })).toBe(1);
+    });
+  });
+
+  describe('new items', () => {
+    it('adds closed shoes for everyone on beach trips', () => {
+      expect(findRule(TRIP_TYPE_RULES.beach, 'closed-shoes')).toMatchObject({
+        title: 'Closed shoes',
+        category: 'clothing',
+        appliesTo: 'everyone',
+        reason: 'For temples, towns and day trips',
+      });
+    });
+
+    it('adds shared travel insurance to the base documents', () => {
+      expect(findRule(BASE_RULES, 'travel-insurance')).toMatchObject({
+        category: 'documents',
+        appliesTo: 'shared',
+        reason: 'Medical cover and cancellations',
+      });
+    });
+
+    it('adds hand sanitizer as a shared toiletry', () => {
+      expect(findRule(WEATHER_RULES, 'hand-sanitizer')).toMatchObject({
+        category: 'toiletries',
+        appliesTo: 'shared',
+      });
+    });
+
+    it('gives the heat reason for hand sanitizer', () => {
+      const ctx = ctxFromTrip(trip(), weather({ maxTemp: 31, isSeasonalEstimate: true }));
+      expect(reasonOf(findRule(WEATHER_RULES, 'hand-sanitizer'), ctx)).toBe(
+        'Highs up to 31°C (seasonal estimate)',
+      );
+    });
+
+    it.each(['beach', 'mountains'] as const)(
+      'does not add hand sanitizer on a mild %s trip',
+      (tripType) => {
+        const ctx = ctxFromTrip(trip({ tripType }), mild);
+        expect(appliesIn(findRule(WEATHER_RULES, 'hand-sanitizer'), ctx)).toBe(false);
+      },
+    );
+
+    it("adds a driver's licence per adult on mountain trips", () => {
+      expect(findRule(TRIP_TYPE_RULES.mountains, 'drivers-licence')).toMatchObject({
+        category: 'documents',
+        appliesTo: 'adult',
+        reason: 'Mountain areas are often easiest to reach by car',
+      });
+    });
   });
 });
 
@@ -934,5 +1135,20 @@ describe('suggest contract', () => {
       ...FAMILY_RULES,
     ].map((rule) => rule.key);
     expect(allKeys.filter((key) => !generated.has(key))).toEqual([]);
+  });
+});
+
+describe('rules-reviewer fixes', () => {
+  it.each([
+    [-1, false],
+    [0, false],
+    [1, true],
+  ])('with a high of %s°C the rain flag is %s', (maxTemp, expected) => {
+    const flags = deriveWeatherFlags(weather({ minTemp: -8, maxTemp, rainDays: 2 }));
+    expect(flags.rain).toBe(expected);
+  });
+
+  it('gives adults a daypack on mountain trips', () => {
+    expect(findRule(TRIP_TYPE_RULES.mountains, 'hiking-daypack').appliesTo).toBe('adult');
   });
 });
