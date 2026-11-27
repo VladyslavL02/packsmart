@@ -5,6 +5,7 @@ import {
   groupByCategory,
   newAiRows,
   packingProgress,
+  shownAiStatus,
   travelersLabel,
 } from './listView';
 import { CATEGORIES } from './types';
@@ -408,4 +409,25 @@ describe('travelersLabel', () => {
   it('omits the kid group for an adults-only trip', () => {
     expect(travelersLabel([adult('a1'), adult('a2')])).toBe('2 travelers (2A)');
   });
+});
+
+describe('shownAiStatus', () => {
+  const rules = [item('1')];
+  const withAi = [item('1'), item('2', { source: 'ai' })];
+
+  it('offers Retry when this browser has no status and the list has no AI rows', () => {
+    expect(shownAiStatus(undefined, rules)).toBe('unavailable');
+  });
+
+  it('shows nothing when this browser has no status but AI rows exist', () => {
+    expect(shownAiStatus(undefined, withAi)).toBeUndefined();
+  });
+
+  it.each(['loading', 'ok', 'empty', 'unavailable'] as const)(
+    'keeps the status %s this browser already has',
+    (status) => {
+      expect(shownAiStatus(status, rules)).toBe(status);
+      expect(shownAiStatus(status, withAi)).toBe(status);
+    },
+  );
 });

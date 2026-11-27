@@ -308,6 +308,21 @@ describe('tripStore', () => {
       expect(Object.keys(store.getState().trips)).toEqual([firstId]);
     });
 
+    it('starts a second insert for different input while the first is pending', async () => {
+      const { store } = emptyStore();
+      const insert = deferred<SavedTrip>();
+      insertTripMock.mockReturnValueOnce(insert.promise);
+
+      const first = store.getState().createTrip(familyTrip, weather);
+      const second = store.getState().createTrip({ ...familyTrip, city: 'Rome' }, weather);
+      await flush();
+
+      expect(insertTripMock).toHaveBeenCalledTimes(2);
+      insert.resolve(insertTripMock.mock.calls[0][0]);
+      const [firstId, secondId] = await Promise.all([first, second]);
+      expect(secondId).not.toBe(firstId);
+    });
+
     it('tries the insert again on a call after a failure', async () => {
       const { store } = emptyStore();
       insertTripMock.mockRejectedValueOnce(new Error('offline'));
@@ -1239,6 +1254,148 @@ describe('tripStore', () => {
       store.getState().applyRemoteUpsert({ ...before[before.length - 1] });
 
       expect(rows()).toEqual(before);
+    });
+
+    describe('echoes of this tab\'s own writes', () => {
+      const first = async () => {
+        const ctx = await setup();
+        const row = () => ctx.rows()[0];
+
+        return { ...ctx, row, start: { ...row() } };
+      };
+
+      it('keeps the newest quantity when an older echo arrives', async () => {
+        const { store, tripId, row, start } = await first();
+        const { setQuantity, applyRemoteUpsert } = store.getState();
+        setQuantity(tripId, start.id, 8);
+        setQuantity(tripId, start.id, 9);
+
+        applyRemoteUpsert({ ...start, quantity: 8 });
+        expect(row().quantity).toBe(9);
+        applyRemoteUpsert({ ...start, quantity: 9 });
+        expect(row().quantity).toBe(9);
+      });
+
+      it('keeps the last tick state through three fast clicks', async () => {
+        const { store, tripId, row, start } = await first();
+        const { togglePacked, applyRemoteUpsert } = store.getState();
+        togglePacked(tripId, start.id);
+        togglePacked(tripId, start.id);
+        togglePacked(tripId, start.id);
+
+        for (const isPacked of [true, false, true]) {
+          applyRemoteUpsert({ ...start, isPacked });
+          expect(row().isPacked).toBe(true);
+        }
+      });
+
+      it('keeps a pending tick when the echo of another column arrives first', async () => {
+        const { store, tripId, row, start } = await first();
+        const { setQuantity, togglePacked, applyRemoteUpsert } = store.getState();
+        setQuantity(tripId, start.id, 8);
+        togglePacked(tripId, start.id);
+
+        applyRemoteUpsert({ ...start, quantity: 8 });
+
+        expect(row()).toMatchObject({ quantity: 8, isPacked: true });
+      });
+
+      it('keeps a category marked packed when an older echo arrives', async () => {
+        const { store, tripId, row, start } = await first();
+        const { togglePacked, markCategoryPacked, applyRemoteUpsert } = store.getState();
+        togglePacked(tripId, start.id);
+        togglePacked(tripId, start.id);
+        markCategoryPacked(tripId, start.category, [start.id]);
+
+        applyRemoteUpsert({ ...start, isPacked: true });
+        applyRemoteUpsert({ ...start, isPacked: false });
+
+        expect(row().isPacked).toBe(true);
+      });
+
+      it('takes a value from another device that this tab never wrote', async () => {
+        const { store, tripId, row, start } = await first();
+        store.getState().setQuantity(tripId, start.id, 8);
+
+        store.getState().applyRemoteUpsert({ ...start, quantity: 20 });
+
+        expect(row().quantity).toBe(20);
+      });
+
+      it('takes remote values again once its own echo has arrived', async () => {
+        const { store, tripId, row, start } = await first();
+        store.getState().setQuantity(tripId, start.id, 8);
+        store.getState().applyRemoteUpsert({ ...start, quantity: 8 });
+
+        store.getState().applyRemoteUpsert({ ...start });
+
+        expect(row().quantity).toBe(start.quantity);
+      });
+
+      // The echo is lost (socket down), a reload shows the saved value, then another
+      // device sets the old value back.
+      it.each([
+        ['tick', (ctx: Setup, id: string) => ctx.store.getState().togglePacked(ctx.tripId, id)],
+        [
+          'quantity',
+          (ctx: Setup, id: string) => ctx.store.getState().setQuantity(ctx.tripId, id, 8),
+        ],
+        [
+          'mark all',
+          (ctx: Setup, id: string) =>
+            ctx.store.getState().markCategoryPacked(ctx.tripId, ctx.rows()[0].category, [id]),
+        ],
+      ])('takes the old value back after a lost %s echo and a reload', async (_name, write) => {
+        const ctx = await first();
+        write(ctx, ctx.start.id);
+        await flush();
+        fetchTripMock.mockResolvedValue({
+          trip: ctx.store.getState().trips[ctx.tripId],
+          items: ctx.rows(),
+        });
+        await ctx.store.getState().loadTrip(ctx.tripId);
+
+        ctx.store.getState().applyRemoteUpsert({ ...ctx.start });
+
+        expect(ctx.row()).toEqual(ctx.start);
+      });
+
+      it('still skips the older echo of a write made while a reload was running', async () => {
+        const { store, tripId, rows, row, start } = await first();
+        const fetched = deferred<{ trip: SavedTrip; items: PackingItem[] }>();
+        fetchTripMock.mockReturnValue(fetched.promise);
+        const loading = store.getState().loadTrip(tripId);
+        const before = { trip: store.getState().trips[tripId], items: rows() };
+        store.getState().setQuantity(tripId, start.id, 8);
+        store.getState().setQuantity(tripId, start.id, 9);
+        fetched.resolve(before);
+        await loading;
+
+        store.getState().applyRemoteUpsert({ ...start, quantity: 8 });
+
+        expect(row().quantity).toBe(9);
+      });
+
+      it('stops waiting for an echo that never came', async () => {
+        const { store, tripId, row, start } = await first();
+        store.getState().setQuantity(tripId, start.id, 8);
+        vi.setSystemTime(new Date(Date.now() + 11_000));
+
+        store.getState().applyRemoteUpsert({ ...start });
+
+        expect(row().quantity).toBe(start.quantity);
+      });
+
+      it('takes remote values after its write failed', async () => {
+        const { store, tripId, row, start } = await first();
+        updateItemMock.mockRejectedValueOnce(new Error('offline'));
+        store.getState().setQuantity(tripId, start.id, 8);
+        await flush();
+
+        store.getState().applyRemoteUpsert({ ...start });
+
+        expect(row().quantity).toBe(start.quantity);
+      });
     });
 
     it('removes a remotely deleted row from the trip that holds it', async () => {

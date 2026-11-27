@@ -9,7 +9,7 @@ export type ItemPatch = Partial<Pick<PackingItem, 'isPacked' | 'quantity'>>;
 export type TripHandlers = {
   onUpsert: (item: PackingItem) => void;
   onDelete: (id: string) => void;
-  /** The channel has joined, or rejoined: changes made before this weren't delivered. */
+  /** Database changes started flowing, on join or rejoin: changes made before this weren't delivered. */
   onReady?: () => void;
 };
 
@@ -37,7 +37,10 @@ export async function insertItems(items: PackingItem[]): Promise<void> {
   if (error) {fail('insert items', error);}
 }
 
-/** A trip is never left without its rules rows: if they can't be saved, the trip is deleted. */
+/**
+ * If the rules rows can't be saved, the trip is deleted again. This is best effort: the delete
+ * is a second request, so a lost connection or a closed tab can leave an empty trip behind.
+ */
 export async function insertTripWithItems(
   trip: SavedTrip,
   items: PackingItem[],
@@ -141,9 +144,13 @@ export function subscribeToTrip(tripId: string, handlers: TripHandlers): () => v
       const id = deletedItemId(payload.old);
       if (id) {handlers.onDelete(id);}
     })
-    .subscribe((status) => {
-      if (status === 'SUBSCRIBED') {handlers.onReady?.();}
-    });
+    // Sent once database changes really flow, which is later than the channel's SUBSCRIBED.
+    .on('system', {}, (payload: { extension?: string; status?: string }) => {
+      if (payload.extension === 'postgres_changes' && payload.status === 'ok') {
+        handlers.onReady?.();
+      }
+    })
+    .subscribe();
 
   return () => void supabase.removeChannel(channel);
 }

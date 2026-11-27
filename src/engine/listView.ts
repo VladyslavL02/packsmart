@@ -1,6 +1,6 @@
 import { normalizeTitle } from './generator';
 import { CATEGORIES } from './types';
-import type { Category, Member, PackingItem, PackingItemDraft } from './types';
+import type { AiStatus, Category, Member, PackingItem, PackingItemDraft } from './types';
 
 export type ItemFilter = 'all' | 'mine' | 'shared' | { memberId: string };
 export type Ratio = { packed: number; total: number };
@@ -107,4 +107,17 @@ export function travelersLabel(members: Member[]): string {
   const noun = members.length === 1 ? 'traveler' : 'travelers';
 
   return `${members.length} ${noun} (${groups.filter(Boolean).join(', ')})`;
+}
+
+/**
+ * The AI status is kept per browser. Where there is none (a shared link on another device),
+ * a list without AI rows still offers Retry.
+ */
+export function shownAiStatus(
+  saved: AiStatus | 'loading' | undefined,
+  items: Pick<PackingItem, 'source'>[],
+): AiStatus | 'loading' | undefined {
+  if (saved) {return saved;}
+
+  return items.some((item) => item.source === 'ai') ? undefined : 'unavailable';
 }

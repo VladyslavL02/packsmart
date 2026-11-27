@@ -171,6 +171,13 @@ describe('insertTripWithItems', () => {
 
     expect(tables()).toEqual(['trips']);
   });
+
+  it('returns the saved row, not the input, so created_at is the database value', async () => {
+    const createdAt = '2026-11-27T11:00:00.000Z';
+    queue('trips', ok({ ...tripRow(), created_at: createdAt }));
+
+    await expect(insertTripWithItems(trip(), items)).resolves.toEqual(trip({ createdAt }));
+  });
 });
 
 describe('row order', () => {
@@ -230,6 +237,13 @@ describe('fetchTrip', () => {
 
     await expect(fetchTrip(TRIP_ID)).rejects.toThrow('read failed');
   });
+
+  it('throws when only the items query errors', async () => {
+    queue('trips', ok(tripRow()));
+    queue('packing_items', fail('items read failed'));
+
+    await expect(fetchTrip(TRIP_ID)).rejects.toThrow('items read failed');
+  });
 });
 
 describe('fetchTripSummaries', () => {
@@ -256,6 +270,16 @@ describe('fetchTripSummaries', () => {
       ]),
     );
   });
+
+  // An empty list on error would make Recent forget every trip.
+  it.each(['trips', 'packing_items'] as const)(
+    'throws when the %s query errors',
+    async (table) => {
+      queue(table, fail('summary read failed'));
+
+      await expect(fetchTripSummaries([TRIP_ID])).rejects.toThrow('summary read failed');
+    },
+  );
 });
 
 describe('item writes', () => {
@@ -321,14 +345,13 @@ describe('subscribeToTrip', () => {
 
   const subscribe = (tripId = TRIP_ID, { withReady = true } = {}) => {
     const listeners: { type: string; filter: Filter; callback: Listener }[] = [];
-    type StatusSubscribe = (callback?: (status: string) => void) => unknown;
-    const channel: { on: Mock; subscribe: Mock<StatusSubscribe> } = {
+    const channel: { on: Mock; subscribe: Mock } = {
       on: vi.fn((type: string, filter: Filter, callback: Listener) => {
         listeners.push({ type, filter, callback });
 
         return channel;
       }),
-      subscribe: vi.fn<StatusSubscribe>(() => channel),
+      subscribe: vi.fn(() => channel),
     };
     vi.mocked(supabase.channel).mockReturnValue(channel as never);
     const onReady = vi.fn();
@@ -336,11 +359,11 @@ describe('subscribeToTrip', () => {
     // A variable, not an inline literal, so the optional onReady is accepted structurally.
     const passed = withReady ? { ...handlers, onReady } : handlers;
     const unsubscribe = subscribeToTrip(tripId, passed);
-    // Plays the part of Supabase reporting the channel status.
-    const report = (status: string) => {
-      const callback = channel.subscribe.mock.calls[0]?.[0];
-      if (!callback) {throw new Error('no status callback passed to subscribe');}
-      callback(status);
+    // Plays the part of the server's `system` message.
+    const report = (extension: string, status: string) => {
+      const found = listeners.find((entry) => entry.type === 'system');
+      if (!found) {throw new Error('no system listener');}
+      (found.callback as unknown as (payload: object) => void)({ extension, status });
     };
     const listener = (event: string) => {
       const found = listeners.find((entry) => entry.filter.event === event);
@@ -352,37 +375,32 @@ describe('subscribeToTrip', () => {
     return { channel, handlers, unsubscribe, listener, onReady, report };
   };
 
-  it('passes a status callback to the channel subscribe', () => {
-    const { channel } = subscribe();
-
-    expect(channel.subscribe).toHaveBeenCalledWith(expect.any(Function));
-  });
-
-  it('calls onReady each time the status is SUBSCRIBED', () => {
+  // The channel status 'SUBSCRIBED' comes before the database stream is live.
+  it('calls onReady each time the server says the database subscription is live', () => {
     const { onReady, report } = subscribe();
     expect(onReady).not.toHaveBeenCalled();
 
-    report('SUBSCRIBED');
-    report('SUBSCRIBED');
+    report('postgres_changes', 'ok');
+    report('postgres_changes', 'ok');
 
     expect(onReady).toHaveBeenCalledTimes(2);
   });
 
-  it.each(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'])(
-    'does not call onReady for the status %s',
-    (status) => {
-      const { onReady, report } = subscribe();
+  it.each([
+    ['postgres_changes', 'error'],
+    ['system', 'ok'],
+  ])('does not call onReady for a %s message with status %s', (extension, status) => {
+    const { onReady, report } = subscribe();
 
-      report(status);
+    report(extension, status);
 
-      expect(onReady).not.toHaveBeenCalled();
-    },
-  );
+    expect(onReady).not.toHaveBeenCalled();
+  });
 
-  it('does not throw on SUBSCRIBED when the handlers have no onReady', () => {
+  it('does not throw on the live message when the handlers have no onReady', () => {
     const { report } = subscribe(TRIP_ID, { withReady: false });
 
-    expect(() => report('SUBSCRIBED')).not.toThrow();
+    expect(() => report('postgres_changes', 'ok')).not.toThrow();
   });
 
   it('subscribes to inserts and updates filtered by trip id', () => {

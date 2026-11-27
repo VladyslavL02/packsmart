@@ -26,6 +26,18 @@ export type LoadStatus = 'loading' | 'ready' | 'missing' | 'error';
 
 const RELOADED_MESSAGE = "Couldn't save — refreshed the list";
 const OFFLINE_MESSAGE = "Couldn't save — check your connection";
+// After this long an echo counts as lost, so remote values are taken again.
+const ECHO_TIMEOUT_MS = 10_000;
+
+type Column = 'isPacked' | 'quantity';
+/** Values this tab wrote to one column and hasn't seen come back, oldest first. */
+type PendingEcho = {
+  base: PackingItem[Column];
+  values: PackingItem[Column][];
+  sentAt: number;
+  /** Number of the latest write, to tell whether a fetch started after it. */
+  write: number;
+};
 
 /** The only part kept in localStorage: trips and items live in Supabase. */
 type Preferences = {
@@ -198,7 +210,7 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
   return create<TripState>()(
     persist(
       (set, get) => {
-        let pending: Promise<string> | null = null;
+        let pending: { key: string; promise: Promise<string> } | null = null;
 
         // One list per running fetch: what changed while it ran, to apply on top of its result.
         const journals = new Map<string, Set<ItemsUpdate[]>>();
@@ -253,6 +265,66 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
         };
         const findItem = (tripId: string, itemId: string) =>
           get().items[tripId]?.find((item) => item.id === itemId);
+
+        // Row id to the writes whose Realtime echo is still on its way.
+        const echoes = new Map<string, Partial<Record<Column, PendingEcho>>>();
+        let writes = 0;
+        // Server rows replace the screen, so stop waiting for echoes of writes made before
+        // the fetch: if one was lost, it must not hide a later change from another device.
+        const forgetEchoes = (rows: PackingItem[], writesBeforeFetch: number) => {
+          for (const { id } of rows) {
+            for (const column of ['isPacked', 'quantity'] as const) {
+              const echo = echoes.get(id)?.[column];
+              if (echo && echo.write <= writesBeforeFetch) {delete echoes.get(id)?.[column];}
+            }
+          }
+        };
+        const pendingEcho = (itemId: string, column: Column) => {
+          const echo = echoes.get(itemId)?.[column];
+
+          return echo && Date.now() - echo.sentAt < ECHO_TIMEOUT_MS ? echo : undefined;
+        };
+        // Call before the change is on screen: `item` still holds the old value.
+        const expectEcho = <C extends Column>(
+          item: PackingItem,
+          column: C,
+          value: PackingItem[C],
+        ) => {
+          const echo = pendingEcho(item.id, column);
+          echoes.set(item.id, {
+            ...echoes.get(item.id),
+            [column]: {
+              base: echo ? echo.base : item[column],
+              values: [...(echo?.values ?? []), value],
+              sentAt: Date.now(),
+              write: ++writes,
+            },
+          });
+        };
+        // Echoes arrive in write order, so an older one must not undo a newer change.
+        const withoutStaleValues = (remote: PackingItem): PackingItem => {
+          let item = remote;
+          for (const column of ['isPacked', 'quantity'] as const) {
+            const echo = pendingEcho(remote.id, column);
+            if (!echo) {continue;}
+            const latest = echo.values[echo.values.length - 1];
+            if (remote[column] === echo.values[0]) {
+              echo.base = echo.values[0];
+              echo.values = echo.values.slice(1);
+            } else if (remote[column] !== echo.base) {
+              // A value this tab didn't write: it comes from another device.
+              echo.values = [];
+            }
+            if (echo.values.length === 0) {
+              // The last own echo, or another device's value: show what arrived.
+              delete echoes.get(remote.id)?.[column];
+            } else {
+              item = { ...item, [column]: latest };
+            }
+          }
+
+          return item;
+        };
         const setAiStatus = (tripId: string, status: AiStoreStatus) => {
           set((state) => ({ aiStatus: { ...state.aiStatus, [tripId]: status } }));
         };
@@ -263,11 +335,13 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
         // After a failed write the screen is ahead of the database, so take the server's rows.
         const reload = async (tripId: string) => {
           const request = startFetch(tripId);
+          const writesBeforeFetch = writes;
           try {
             const data = await fetchLatest(tripId);
             if (data) {
               if (!request.isStale()) {
                 request.markApplied();
+                forgetEchoes(data.items, writesBeforeFetch);
                 // Not journaled: a load still running started later and has newer rows.
                 setItems(tripId, () => data.items);
               }
@@ -281,9 +355,11 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
           set({ saveError: OFFLINE_MESSAGE, saveErrorTripId: tripId });
         };
         // The change is already on screen; this only persists it.
-        const save = (tripId: string, write: Promise<void>) => {
+        const save = (tripId: string, write: Promise<void>, itemIds: string[] = []) => {
           void write.catch((error: unknown) => {
             console.warn('[store] could not save the change:', error);
+            // No echo will come for a failed write.
+            itemIds.forEach((id) => echoes.delete(id));
 
             return reload(tripId);
           });
@@ -313,17 +389,21 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
 
           // A double submit gets the running insert instead of starting a second one.
           createTrip: (input, weather) => {
-            pending ??= insertTrip(input, weather).finally(() => {
-              pending = null;
+            const key = JSON.stringify([input, weather]);
+            if (pending?.key === key) {return pending.promise;}
+            const promise = insertTrip(input, weather).finally(() => {
+              if (pending?.promise === promise) {pending = null;}
             });
+            pending = { key, promise };
 
-            return pending;
+            return promise;
           },
 
           loadTrip: async (tripId) => {
             // A repeat load of a missing trip must not flash the skeleton.
             if (get().load[tripId] !== 'missing') {setLoad(tripId, 'loading');}
             const request = startFetch(tripId);
+            const writesBeforeFetch = writes;
             // A result that doesn't count must not leave the status on 'loading'.
             const settle = () => {
               if (get().load[tripId] === 'loading' && get().items[tripId]) {
@@ -343,6 +423,7 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
 
                 return;
               }
+              forgetEchoes(data.items, writesBeforeFetch);
               set((state) => ({
                 trips: { ...state.trips, [tripId]: data.trip },
                 items: { ...state.items, [tripId]: data.items },
@@ -360,7 +441,8 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
           },
 
           // Matched by id, so the echo of this tab's own insert doesn't duplicate the row.
-          applyRemoteUpsert: (item) => {
+          applyRemoteUpsert: (remote) => {
+            const item = withoutStaleValues(remote);
             updateItems(item.tripId, (items) =>
               items.some((row) => row.id === item.id)
                 ? items.map((row) => (row.id === item.id ? item : row))
@@ -385,8 +467,9 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
             const item = findItem(tripId, itemId);
             if (!item) {return;}
             const isPacked = !item.isPacked;
+            expectEcho(item, 'isPacked', isPacked);
             updateItem(tripId, itemId, (row) => ({ ...row, isPacked }));
-            save(tripId, tripRepo.updateItem(itemId, { isPacked }));
+            save(tripId, tripRepo.updateItem(itemId, { isPacked }), [itemId]);
           },
 
           setQuantity: (tripId, itemId, quantity) => {
@@ -394,9 +477,11 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
             const clamped = Number.isFinite(quantity)
               ? Math.min(MAX_QUANTITY, Math.max(1, Math.round(quantity)))
               : 1;
-            if (!findItem(tripId, itemId)) {return;}
+            const item = findItem(tripId, itemId);
+            if (!item) {return;}
+            expectEcho(item, 'quantity', clamped);
             updateItem(tripId, itemId, (row) => ({ ...row, quantity: clamped }));
-            save(tripId, tripRepo.updateItem(itemId, { quantity: clamped }));
+            save(tripId, tripRepo.updateItem(itemId, { quantity: clamped }), [itemId]);
           },
 
           deleteItem: (tripId, itemId) => {
@@ -436,18 +521,18 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
 
           markCategoryPacked: (tripId, category, itemIds) => {
             const only = itemIds && new Set(itemIds);
-            const ids = (get().items[tripId] ?? [])
-              .filter(
-                (item) =>
-                  item.category === category && !item.isPacked && (!only || only.has(item.id)),
-              )
-              .map((item) => item.id);
-            if (ids.length === 0) {return;}
+            const unpacked = (get().items[tripId] ?? []).filter(
+              (item) =>
+                item.category === category && !item.isPacked && (!only || only.has(item.id)),
+            );
+            if (unpacked.length === 0) {return;}
+            unpacked.forEach((item) => expectEcho(item, 'isPacked', true));
+            const ids = unpacked.map((item) => item.id);
             const marked = new Set(ids);
             updateItems(tripId, (items) =>
               items.map((item) => (marked.has(item.id) ? { ...item, isPacked: true } : item)),
             );
-            save(tripId, tripRepo.updateItems(ids, { isPacked: true }));
+            save(tripId, tripRepo.updateItems(ids, { isPacked: true }), ids);
           },
 
           setCurrentMember: (tripId, memberId) => {

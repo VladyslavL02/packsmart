@@ -16,6 +16,7 @@ import {
   filterItems,
   groupByCategory,
   packingProgress,
+  shownAiStatus,
   travelersLabel,
 } from '../engine/listView';
 import type { ItemFilter } from '../engine/listView';
@@ -143,7 +144,10 @@ function TripView({ tripId }: { tripId: string }) {
         onFilter={setFilter}
         onUnpackedOnly={setUnpackedOnly}
       />
-      <AiStatusRow status={aiStatus} onRetry={() => void runAiSuggestions(tripId)} />
+      <AiStatusRow
+        status={shownAiStatus(aiStatus, items)}
+        onRetry={() => void runAiSuggestions(tripId)}
+      />
       {groups.map((group) => (
         <CategorySection
           key={group.category}
