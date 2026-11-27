@@ -367,6 +367,410 @@ describe('tripStore', () => {
     });
   });
 
+  describe('changes while a fetch is pending', () => {
+    type Fetched = Awaited<ReturnType<typeof fetchTrip>>;
+
+    const serverData = (items: PackingItem[], tripId = SERVER_TRIP_ID) => ({
+      trip: savedTrip({ id: tripId }),
+      items,
+    });
+    const nextFetch = () => {
+      const fetched = deferred<Fetched>();
+      fetchTripMock.mockReturnValueOnce(fetched.promise);
+
+      return fetched;
+    };
+    const row1 = item();
+    const row2 = item({ id: 'row-2', title: 'Server hat' });
+
+    // No items in memory yet: the changes arrive before the first rows do.
+    async function firstLoad(serverRows: PackingItem[], act: (ctx: Setup['store']) => void) {
+      const { store } = emptyStore();
+      const fetched = nextFetch();
+      const pending = store.getState().loadTrip(SERVER_TRIP_ID);
+
+      act(store);
+      fetched.resolve(serverData(serverRows));
+      await pending;
+
+      return store.getState().items[SERVER_TRIP_ID];
+    }
+
+    // Items already in memory, and the fetch returns them as they were before the change.
+    async function staleReload(act: (ctx: Setup) => void) {
+      const ctx = await setup();
+      const stale = ctx.rows();
+      const fetched = nextFetch();
+      const pending = ctx.store.getState().loadTrip(ctx.tripId);
+
+      act(ctx);
+      const changed = ctx.rows();
+      fetched.resolve(serverData(stale, ctx.tripId));
+      await pending;
+
+      return { ...ctx, stale, changed };
+    }
+
+    it('keeps a remote upsert of an existing row on a first load', async () => {
+      const remote = { ...row1, isPacked: true, quantity: 4 };
+
+      const rows = await firstLoad([row1, row2], (store) => {
+        store.getState().applyRemoteUpsert(remote);
+      });
+
+      expect(rows).toEqual([remote, row2]);
+    });
+
+    it('keeps a remote upsert of a new row on a first load', async () => {
+      const rows = await firstLoad([row1], (store) => {
+        store.getState().applyRemoteUpsert(row2);
+      });
+
+      expect(rows).toEqual([row1, row2]);
+    });
+
+    it('keeps a remote delete on a first load', async () => {
+      const rows = await firstLoad([row1, row2], (store) => {
+        store.getState().applyRemoteDelete(row1.id);
+      });
+
+      expect(rows).toEqual([row2]);
+    });
+
+    it('applies pending changes in the order they happened', async () => {
+      const row3 = item({ id: 'row-3', title: 'Server scarf' });
+
+      const rows = await firstLoad([row1], (store) => {
+        store.getState().applyRemoteUpsert({ ...row1, quantity: 2 });
+        store.getState().applyRemoteUpsert({ ...row1, quantity: 5 });
+        store.getState().applyRemoteUpsert(row2);
+        store.getState().applyRemoteDelete(row2.id);
+        store.getState().applyRemoteDelete(row3.id);
+        store.getState().applyRemoteUpsert(row3);
+      });
+
+      expect(rows).toEqual([{ ...row1, quantity: 5 }, row3]);
+    });
+
+    it.each(writes)(
+      'keeps a local %s over a stale reload result',
+      async (_name, _failWrite, act) => {
+        const { rows, stale, changed } = await staleReload(act);
+
+        expect(changed).not.toEqual(stale);
+        expect(rows()).toEqual(changed);
+      },
+    );
+
+    it('does not duplicate a quick-added row the fetch already includes', async () => {
+      const { store, tripId, rows } = await setup();
+      const before = rows();
+      const fetched = nextFetch();
+      const pending = store.getState().loadTrip(tripId);
+
+      store.getState().addUserItem(tripId, 'Lucky charm', null);
+      const added = rows()[before.length];
+      fetched.resolve(serverData([...before, { ...added }], tripId));
+      await pending;
+
+      expect(rows()).toEqual([...before, added]);
+    });
+
+    it.each([
+      ['first', 0, 1],
+      ['second', 1, 0],
+    ])(
+      'keeps a change through two overlapping loads when the %s resolves first',
+      async (_label, earlier, later) => {
+        const { store } = emptyStore();
+        const fetches = [nextFetch(), nextFetch()];
+        const loads = [
+          store.getState().loadTrip(SERVER_TRIP_ID),
+          store.getState().loadTrip(SERVER_TRIP_ID),
+        ];
+        const rows = () => store.getState().items[SERVER_TRIP_ID];
+
+        store.getState().applyRemoteUpsert(row2);
+        fetches[earlier].resolve(serverData([row1]));
+        await loads[earlier];
+        expect(rows()).toEqual([row1, row2]);
+
+        fetches[later].resolve(serverData([row1]));
+        await loads[later];
+
+        expect(rows()).toEqual([row1, row2]);
+      },
+    );
+
+    it('does not replay a change made with no load pending onto a later load', async () => {
+      const { store, tripId, rows } = await setup();
+      const server = rows();
+      store.getState().togglePacked(tripId, server[0].id);
+      store.getState().applyRemoteUpsert(item({ tripId }));
+      store.getState().applyRemoteDelete(server[1].id);
+      await flush();
+      fetchTripMock.mockResolvedValue(serverData(server, tripId));
+
+      await store.getState().loadTrip(tripId);
+
+      expect(rows()).toEqual(server);
+    });
+
+    it('does not replay a change from a finished load onto the next load', async () => {
+      const { store } = emptyStore();
+      const first = nextFetch();
+      const pending = store.getState().loadTrip(SERVER_TRIP_ID);
+      store.getState().applyRemoteUpsert(row2);
+      first.resolve(serverData([row1]));
+      await pending;
+      fetchTripMock.mockResolvedValue(serverData([row1]));
+
+      await store.getState().loadTrip(SERVER_TRIP_ID);
+
+      expect(store.getState().items[SERVER_TRIP_ID]).toEqual([row1]);
+    });
+
+    const row3 = item({ id: 'row-3', title: 'Server gloves' });
+
+    it.each<[string, (store: Setup['store']) => void, PackingItem[]]>([
+      [
+        'upsert of an existing row',
+        (store) => {
+          store.getState().applyRemoteUpsert({ ...row2, quantity: 7 });
+        },
+        [row1, { ...row2, quantity: 7 }],
+      ],
+      [
+        'upsert of a new row',
+        (store) => {
+          store.getState().applyRemoteUpsert(row3);
+        },
+        [row1, row2, row3],
+      ],
+      [
+        'delete',
+        (store) => {
+          store.getState().applyRemoteDelete(row2.id);
+        },
+        [row1],
+      ],
+    ])(
+      'keeps a remote %s that arrives during the re-fetch after a failed write',
+      async (_name, remoteChange, expected) => {
+        const { store } = emptyStore();
+        fetchTripMock.mockResolvedValueOnce(serverData([row1, row2]));
+        await store.getState().loadTrip(SERVER_TRIP_ID);
+        const refetch = nextFetch();
+        updateItemMock.mockRejectedValueOnce(new Error('offline'));
+        store.getState().togglePacked(SERVER_TRIP_ID, row1.id);
+        await flush();
+        expect(fetchTripMock).toHaveBeenCalledTimes(2);
+
+        remoteChange(store);
+        refetch.resolve(serverData([row1, row2]));
+        await flush();
+
+        // row1 is back to the server value: the failed toggle is gone.
+        expect(store.getState().items[SERVER_TRIP_ID]).toEqual(expected);
+      },
+    );
+
+    it.each(writes)(
+      'does not bring a failed %s back when the load resolves after the re-fetch',
+      async (_name, failWrite, act) => {
+        const ctx = await setup();
+        const server = ctx.rows();
+        const load = nextFetch();
+        const pending = ctx.store.getState().loadTrip(ctx.tripId);
+        fetchTripMock.mockResolvedValueOnce(serverData(server, ctx.tripId));
+        failWrite();
+
+        act(ctx);
+        expect(ctx.rows()).not.toEqual(server);
+        await flush();
+        expect(ctx.rows()).toEqual(server);
+
+        load.resolve(serverData(server, ctx.tripId));
+        await pending;
+
+        expect(ctx.rows()).toEqual(server);
+      },
+    );
+
+    describe('out-of-order results', () => {
+      const added = item({ id: 'row-3', title: 'Server gloves' });
+      const loaded = (store: Setup['store']) => ({
+        rows: store.getState().items[SERVER_TRIP_ID],
+        status: store.getState().load[SERVER_TRIP_ID],
+      });
+
+      it.each([
+        ['an updated row', [{ ...row1, quantity: 9 }, row2]],
+        ['an added row', [row1, row2, added]],
+        ['a deleted row', [row1]],
+      ])('does not let an older load undo %s from a newer one', async (_label, newerRows) => {
+        const { store } = emptyStore();
+        const older = nextFetch();
+        const newer = nextFetch();
+        const olderLoad = store.getState().loadTrip(SERVER_TRIP_ID);
+        const newerLoad = store.getState().loadTrip(SERVER_TRIP_ID);
+
+        newer.resolve(serverData(newerRows));
+        await newerLoad;
+        older.resolve(serverData([row1, row2]));
+        await olderLoad;
+
+        expect(loaded(store)).toEqual({ rows: newerRows, status: 'ready' });
+      });
+
+      const newerRows = [{ ...row1, quantity: 9 }, row2, added];
+
+      // A failed write starts the re-fetch, then a load starts; both are left pending.
+      async function refetchThenLoad() {
+        const { store } = emptyStore();
+        fetchTripMock.mockResolvedValueOnce(serverData([row1, row2]));
+        await store.getState().loadTrip(SERVER_TRIP_ID);
+        const refetch = nextFetch();
+        updateItemMock.mockRejectedValueOnce(new Error('offline'));
+        store.getState().togglePacked(SERVER_TRIP_ID, row1.id);
+        await flush();
+        const newer = nextFetch();
+        const load = store.getState().loadTrip(SERVER_TRIP_ID);
+
+        const finish = async (order: string) => {
+          const resolveRefetch = async () => {
+            refetch.resolve(serverData([row1, row2]));
+            await flush();
+          };
+          const resolveLoad = async () => {
+            newer.resolve(serverData(newerRows));
+            await load;
+          };
+          const steps =
+            order === 'load' ? [resolveLoad, resolveRefetch] : [resolveRefetch, resolveLoad];
+          for (const step of steps) {
+            await step();
+          }
+        };
+
+        return { store, finish };
+      }
+
+      it.each(['load', 're-fetch'])(
+        'keeps the newer load over the re-fetch when the %s resolves first',
+        async (order) => {
+          const { store, finish } = await refetchThenLoad();
+
+          await finish(order);
+
+          expect(loaded(store)).toEqual({ rows: newerRows, status: 'ready' });
+        },
+      );
+
+      it.each(['load', 're-fetch'])(
+        'still reports the failed write when the %s resolves first',
+        async (order) => {
+          const { store, finish } = await refetchThenLoad();
+
+          await finish(order);
+
+          expect(store.getState().saveError).toEqual(expect.stringMatching(/\S/));
+          expect(store.getState().saveErrorTripId).toBe(SERVER_TRIP_ID);
+        },
+      );
+
+      it('does not let an older load overwrite a newer re-fetch result', async () => {
+        const { store } = emptyStore();
+        fetchTripMock.mockResolvedValueOnce(serverData([row1, row2]));
+        await store.getState().loadTrip(SERVER_TRIP_ID);
+        const older = nextFetch();
+        const olderLoad = store.getState().loadTrip(SERVER_TRIP_ID);
+        fetchTripMock.mockResolvedValueOnce(serverData(newerRows));
+        updateItemMock.mockRejectedValueOnce(new Error('offline'));
+        store.getState().togglePacked(SERVER_TRIP_ID, row1.id);
+        await flush();
+
+        older.resolve(serverData([row1, row2]));
+        await olderLoad;
+
+        expect(loaded(store)).toEqual({ rows: newerRows, status: 'ready' });
+      });
+
+      it.each<[string, (older: ReturnType<typeof nextFetch>) => void]>([
+        ['finds nothing', (older) => older.resolve(null)],
+        ['rejects', (older) => older.reject(new Error('offline'))],
+      ])('keeps the trip ready when an older load %s afterwards', async (_label, settle) => {
+        const { store } = emptyStore();
+        const older = nextFetch();
+        const newer = nextFetch();
+        const olderLoad = store.getState().loadTrip(SERVER_TRIP_ID);
+        const newerLoad = store.getState().loadTrip(SERVER_TRIP_ID);
+        newer.resolve(serverData([row1]));
+        await newerLoad;
+
+        settle(older);
+        await olderLoad;
+
+        expect(store.getState().trips[SERVER_TRIP_ID]).toEqual(savedTrip());
+        expect(loaded(store)).toEqual({ rows: [row1], status: 'ready' });
+      });
+
+      it.each(['older', 'newer'])(
+        'applies the older result when the newer load rejects and the %s settles first',
+        async (first) => {
+          const { store } = emptyStore();
+          const older = nextFetch();
+          const newer = nextFetch();
+          const olderLoad = store.getState().loadTrip(SERVER_TRIP_ID);
+          const newerLoad = store.getState().loadTrip(SERVER_TRIP_ID);
+          const succeedOlder = async () => {
+            older.resolve(serverData([row1]));
+            await olderLoad;
+          };
+          const failNewer = async () => {
+            newer.reject(new Error('offline'));
+            await newerLoad;
+          };
+
+          const steps =
+            first === 'older' ? [succeedOlder, failNewer] : [failNewer, succeedOlder];
+          for (const step of steps) {
+            await step();
+          }
+
+          expect(loaded(store)).toEqual({ rows: [row1], status: 'ready' });
+        },
+      );
+    });
+
+    it('keeps a missing trip missing while it is loaded again', async () => {
+      const { store } = emptyStore();
+      await store.getState().loadTrip(SERVER_TRIP_ID);
+      const fetched = nextFetch();
+
+      const pending = store.getState().loadTrip(SERVER_TRIP_ID);
+
+      expect(store.getState().load[SERVER_TRIP_ID]).toBe('missing');
+      fetched.resolve(null);
+      await pending;
+      expect(store.getState().load[SERVER_TRIP_ID]).toBe('missing');
+    });
+
+    it('shows loading again when a failed load is retried', async () => {
+      const { store } = emptyStore();
+      fetchTripMock.mockRejectedValueOnce(new Error('offline'));
+      await store.getState().loadTrip(SERVER_TRIP_ID);
+      expect(store.getState().load[SERVER_TRIP_ID]).toBe('error');
+      const fetched = nextFetch();
+
+      const pending = store.getState().loadTrip(SERVER_TRIP_ID);
+
+      expect(store.getState().load[SERVER_TRIP_ID]).toBe('loading');
+      fetched.resolve(null);
+      await pending;
+    });
+  });
+
   describe('item writes', () => {
     it('toggles one row to packed and back, writing each new value', async () => {
       const { store, tripId, rows } = await setup();
@@ -566,6 +970,88 @@ describe('tripStore', () => {
       store.getState().clearSaveError();
 
       expect(store.getState().saveError).toBeNull();
+    });
+  });
+
+  describe('saveErrorTripId', () => {
+    const REFRESHED = "Couldn't save — refreshed the list";
+    const OFFLINE = "Couldn't save — check your connection";
+
+    const saveErrorState = (store: Setup['store']) => {
+      const { saveError, saveErrorTripId } = store.getState();
+
+      return { saveError, saveErrorTripId };
+    };
+
+    it('starts as null', () => {
+      const { store } = emptyStore();
+
+      expect(saveErrorState(store)).toEqual({ saveError: null, saveErrorTripId: null });
+    });
+
+    it.each(writes)(
+      'names the trip when %s fails and the list is refreshed',
+      async (_name, failWrite, act) => {
+        const ctx = await setup();
+        fetchTripMock.mockResolvedValue({
+          trip: savedTrip({ id: ctx.tripId }),
+          items: ctx.rows(),
+        });
+        failWrite();
+
+        act(ctx);
+        await flush();
+
+        expect(saveErrorState(ctx.store)).toEqual({
+          saveError: REFRESHED,
+          saveErrorTripId: ctx.tripId,
+        });
+      },
+    );
+
+    it.each([
+      ['rejects', () => fetchTripMock.mockRejectedValue(new Error('still offline'))],
+      ['finds no trip', () => fetchTripMock.mockResolvedValue(null)],
+    ])('names the trip in the offline case when the re-fetch %s', async (_label, failRefetch) => {
+      const { store, tripId, rows } = await setup();
+      updateItemMock.mockRejectedValue(new Error('offline'));
+      failRefetch();
+
+      store.getState().togglePacked(tripId, rows()[0].id);
+      await flush();
+
+      expect(saveErrorState(store)).toEqual({ saveError: OFFLINE, saveErrorTripId: tripId });
+    });
+
+    it('names the original trip when the failure arrives after another trip is opened', async () => {
+      const { store, tripId, rows } = await setup();
+      const otherId = await store.getState().createTrip(familyTrip, weather);
+      const write = deferred();
+      updateItemMock.mockReturnValueOnce(write.promise);
+      store.getState().togglePacked(tripId, rows()[0].id);
+
+      fetchTripMock.mockImplementation(async (id) => ({
+        trip: savedTrip({ id }),
+        items: store.getState().items[id],
+      }));
+      await store.getState().loadTrip(otherId);
+      store.getState().touchTrip(otherId);
+      write.reject(new Error('offline'));
+      await flush();
+
+      expect(saveErrorState(store)).toEqual({ saveError: REFRESHED, saveErrorTripId: tripId });
+    });
+
+    it('is reset together with saveError by clearSaveError', async () => {
+      const { store, tripId, rows } = await setup();
+      updateItemMock.mockRejectedValue(new Error('offline'));
+      store.getState().togglePacked(tripId, rows()[0].id);
+      await flush();
+      expect(store.getState().saveErrorTripId).toBe(tripId);
+
+      store.getState().clearSaveError();
+
+      expect(saveErrorState(store)).toEqual({ saveError: null, saveErrorTripId: null });
     });
   });
 

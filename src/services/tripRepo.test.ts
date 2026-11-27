@@ -294,19 +294,29 @@ describe('subscribeToTrip', () => {
   type Filter = { event: string; schema: string; table: string; filter?: string };
   type Listener = (payload: { new: unknown; old: unknown }) => void;
 
-  const subscribe = (tripId = TRIP_ID) => {
+  const subscribe = (tripId = TRIP_ID, { withReady = true } = {}) => {
     const listeners: { type: string; filter: Filter; callback: Listener }[] = [];
-    const channel = {
+    type StatusSubscribe = (callback?: (status: string) => void) => unknown;
+    const channel: { on: Mock; subscribe: Mock<StatusSubscribe> } = {
       on: vi.fn((type: string, filter: Filter, callback: Listener) => {
         listeners.push({ type, filter, callback });
 
         return channel;
       }),
-      subscribe: vi.fn(() => channel),
+      subscribe: vi.fn<StatusSubscribe>(() => channel),
     };
     vi.mocked(supabase.channel).mockReturnValue(channel as never);
+    const onReady = vi.fn();
     const handlers = { onUpsert: vi.fn(), onDelete: vi.fn() };
-    const unsubscribe = subscribeToTrip(tripId, handlers);
+    // A variable, not an inline literal, so the optional onReady is accepted structurally.
+    const passed = withReady ? { ...handlers, onReady } : handlers;
+    const unsubscribe = subscribeToTrip(tripId, passed);
+    // Plays the part of Supabase reporting the channel status.
+    const report = (status: string) => {
+      const callback = channel.subscribe.mock.calls[0]?.[0];
+      if (!callback) {throw new Error('no status callback passed to subscribe');}
+      callback(status);
+    };
     const listener = (event: string) => {
       const found = listeners.find((entry) => entry.filter.event === event);
       if (!found) {throw new Error(`no ${event} listener`);}
@@ -314,8 +324,41 @@ describe('subscribeToTrip', () => {
       return found;
     };
 
-    return { channel, handlers, unsubscribe, listener };
+    return { channel, handlers, unsubscribe, listener, onReady, report };
   };
+
+  it('passes a status callback to the channel subscribe', () => {
+    const { channel } = subscribe();
+
+    expect(channel.subscribe).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it('calls onReady each time the status is SUBSCRIBED', () => {
+    const { onReady, report } = subscribe();
+    expect(onReady).not.toHaveBeenCalled();
+
+    report('SUBSCRIBED');
+    report('SUBSCRIBED');
+
+    expect(onReady).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'])(
+    'does not call onReady for the status %s',
+    (status) => {
+      const { onReady, report } = subscribe();
+
+      report(status);
+
+      expect(onReady).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not throw on SUBSCRIBED when the handlers have no onReady', () => {
+    const { report } = subscribe(TRIP_ID, { withReady: false });
+
+    expect(() => report('SUBSCRIBED')).not.toThrow();
+  });
 
   it('subscribes to inserts and updates filtered by trip id', () => {
     const { channel, listener } = subscribe();

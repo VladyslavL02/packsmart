@@ -40,6 +40,8 @@ type TripData = Preferences & {
   items: Record<string, PackingItem[]>;
   load: Record<string, LoadStatus>;
   saveError: string | null;
+  /** The trip whose write failed, so the message doesn't show on another one. */
+  saveErrorTripId: string | null;
 };
 
 type TripActions = {
@@ -74,7 +76,17 @@ const emptyData = (): TripData => ({
   items: {},
   load: {},
   saveError: null,
+  saveErrorTripId: null,
 });
+
+type ItemsUpdate = (items: PackingItem[]) => PackingItem[];
+
+// Skips rows already there: a Realtime echo or a fetch may have brought them first.
+const appendRows = (rows: PackingItem[]): ItemsUpdate => (items) => {
+  const known = new Set(items.map((item) => item.id));
+
+  return [...items, ...rows.filter((row) => !known.has(row.id))];
+};
 
 const toRows = (tripId: string, drafts: PackingItemDraft[]): PackingItem[] =>
   drafts.map((draft) => ({ ...draft, id: crypto.randomUUID(), tripId, isPacked: false }));
@@ -188,12 +200,47 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
       (set, get) => {
         let pending: Promise<string> | null = null;
 
-        const updateItems = (tripId: string, update: (items: PackingItem[]) => PackingItem[]) => {
+        // One list per running fetch: what changed while it ran, to apply on top of its result.
+        const journals = new Map<string, Set<ItemsUpdate[]>>();
+        const setItems = (tripId: string, update: ItemsUpdate) => {
           set((state) => {
             const items = state.items[tripId];
 
             return items ? { items: { ...state.items, [tripId]: update(items) } } : state;
           });
+        };
+        const updateItems = (tripId: string, update: ItemsUpdate) => {
+          journals.get(tripId)?.forEach((journal) => journal.push(update));
+          setItems(tripId, update);
+        };
+        // Responses can arrive out of order: one is stale if a later request's was applied first.
+        const started = new Map<string, number>();
+        const applied = new Map<string, number>();
+        const startFetch = (tripId: string) => {
+          const order = (started.get(tripId) ?? 0) + 1;
+          started.set(tripId, order);
+
+          return {
+            isStale: () => order < (applied.get(tripId) ?? 0),
+            markApplied: () => applied.set(tripId, order),
+          };
+        };
+        // The response can be older than changes made meanwhile, here or on another device.
+        const fetchLatest = async (tripId: string) => {
+          const journal: ItemsUpdate[] = [];
+          const open = journals.get(tripId) ?? new Set<ItemsUpdate[]>();
+          journals.set(tripId, open.add(journal));
+          try {
+            const data = await tripRepo.fetchTrip(tripId);
+
+            return data && {
+              trip: data.trip,
+              items: journal.reduce((items, update) => update(items), data.items),
+            };
+          } finally {
+            open.delete(journal);
+            if (open.size === 0) {journals.delete(tripId);}
+          }
         };
         const updateItem = (
           tripId: string,
@@ -215,18 +262,23 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
 
         // After a failed write the screen is ahead of the database, so take the server's rows.
         const reload = async (tripId: string) => {
+          const request = startFetch(tripId);
           try {
-            const data = await tripRepo.fetchTrip(tripId);
+            const data = await fetchLatest(tripId);
             if (data) {
-              updateItems(tripId, () => data.items);
-              set({ saveError: RELOADED_MESSAGE });
+              if (!request.isStale()) {
+                request.markApplied();
+                // Not journaled: a load still running started later and has newer rows.
+                setItems(tripId, () => data.items);
+              }
+              set({ saveError: RELOADED_MESSAGE, saveErrorTripId: tripId });
 
               return;
             }
           } catch (error) {
             console.warn('[store] could not reload the list:', error);
           }
-          set({ saveError: OFFLINE_MESSAGE });
+          set({ saveError: OFFLINE_MESSAGE, saveErrorTripId: tripId });
         };
         // The change is already on screen; this only persists it.
         const save = (tripId: string, write: Promise<void>) => {
@@ -269,9 +321,23 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
           },
 
           loadTrip: async (tripId) => {
-            setLoad(tripId, 'loading');
+            // A repeat load of a missing trip must not flash the skeleton.
+            if (get().load[tripId] !== 'missing') {setLoad(tripId, 'loading');}
+            const request = startFetch(tripId);
+            // A result that doesn't count must not leave the status on 'loading'.
+            const settle = () => {
+              if (get().load[tripId] === 'loading' && get().items[tripId]) {
+                setLoad(tripId, 'ready');
+              }
+            };
             try {
-              const data = await tripRepo.fetchTrip(tripId);
+              const data = await fetchLatest(tripId);
+              if (request.isStale()) {
+                settle();
+
+                return;
+              }
+              request.markApplied();
               if (!data) {
                 setLoad(tripId, 'missing');
 
@@ -284,7 +350,12 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
               }));
             } catch (error) {
               console.warn('[store] could not load the trip:', error);
-              setLoad(tripId, 'error');
+              // A trip already on screen stays usable.
+              if (!request.isStale() && !get().items[tripId]) {
+                setLoad(tripId, 'error');
+              } else {
+                settle();
+              }
             }
           },
 
@@ -299,14 +370,15 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
 
           // Every delete arrives, whatever the trip, so an unknown id must change nothing.
           applyRemoteDelete: (itemId) => {
+            const remove: ItemsUpdate = (items) => items.filter((item) => item.id !== itemId);
+            // The payload has no trip id, and a first load has no rows to find it in.
+            journals.forEach((open) => open.forEach((journal) => journal.push(remove)));
             const tripId = Object.keys(get().items).find((id) => findItem(id, itemId));
-            if (tripId) {
-              updateItems(tripId, (items) => items.filter((item) => item.id !== itemId));
-            }
+            if (tripId) {setItems(tripId, remove);}
           },
 
           clearSaveError: () => {
-            set({ saveError: null });
+            set({ saveError: null, saveErrorTripId: null });
           },
 
           togglePacked: (tripId, itemId) => {
@@ -356,7 +428,7 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
                 reason: null,
               },
             ]);
-            updateItems(tripId, (items) => [...items, ...rows]);
+            updateItems(tripId, appendRows(rows));
             save(tripId, tripRepo.insertItems(rows));
 
             return true;
@@ -412,12 +484,7 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
               const rows = toRows(tripId, newAiRows(latest, merged));
               // Saved first: a failed insert leaves the list as it was.
               await tripRepo.insertItems(rows);
-              // The Realtime echo may have added some of these while the insert was running.
-              updateItems(tripId, (items) => {
-                const known = new Set(items.map((item) => item.id));
-
-                return [...items, ...rows.filter((row) => !known.has(row.id))];
-              });
+              updateItems(tripId, appendRows(rows));
               setAiStatus(tripId, res.status);
             } catch (error) {
               // Never leave the status stuck on 'loading'.

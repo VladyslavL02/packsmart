@@ -91,7 +91,9 @@ function TripView({ tripId }: { tripId: string }) {
   const setCurrentMember = useTripStore((state) => state.setCurrentMember);
   const touchTrip = useTripStore((state) => state.touchTrip);
   const runAiSuggestions = useTripStore((state) => state.runAiSuggestions);
-  const saveError = useTripStore((state) => state.saveError);
+  const saveError = useTripStore((state) =>
+    state.saveErrorTripId === tripId ? state.saveError : null,
+  );
   const clearSaveError = useTripStore((state) => state.clearSaveError);
   const [filter, setFilter] = useState<ItemFilter>('all');
   const [unpackedOnly, setUnpackedOnly] = useState(false);
@@ -188,10 +190,11 @@ export function TripPage() {
 
   // Reloads even a trip already in memory: changes made while away weren't received.
   useEffect(() => {
-    // Subscribe first, so a change made during the fetch isn't missed.
     const unsubscribe = subscribeToTrip(tripId, {
       onUpsert: applyRemoteUpsert,
       onDelete: applyRemoteDelete,
+      // Joining takes a moment, so fetch again to pick up what changed before it.
+      onReady: () => void loadTrip(tripId),
     });
     void loadTrip(tripId);
 

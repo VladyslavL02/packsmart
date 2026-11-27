@@ -9,6 +9,8 @@ export type ItemPatch = Partial<Pick<PackingItem, 'isPacked' | 'quantity'>>;
 export type TripHandlers = {
   onUpsert: (item: PackingItem) => void;
   onDelete: (id: string) => void;
+  /** The channel has joined, or rejoined: changes made before this weren't delivered. */
+  onReady?: () => void;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -132,7 +134,9 @@ export function subscribeToTrip(tripId: string, handlers: TripHandlers): () => v
       const id = deletedItemId(payload.old);
       if (id) {handlers.onDelete(id);}
     })
-    .subscribe();
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {handlers.onReady?.();}
+    });
 
   return () => void supabase.removeChannel(channel);
 }
