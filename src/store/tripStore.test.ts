@@ -47,6 +47,11 @@ const suggestion = (overrides: Partial<AiSuggestion> = {}): AiSuggestion => ({
   ...overrides,
 });
 
+type SavedState = {
+  trips: Record<string, object>;
+  items: Record<string, object[]>;
+};
+
 function memoryStorage() {
   const map = new Map<string, string>();
   const storage: StateStorage = {
@@ -383,6 +388,25 @@ describe('tripStore', () => {
     const tripId = store.getState().createTrip(trip, weather);
     expect(store.getState().trips[tripId]).toBeDefined();
     expect(store.getState().items[tripId].length).toBeGreaterThan(0);
+  });
+
+  it.each<[string, (state: SavedState, tripId: string) => void]>([
+    ['an item with a null quantity', (state, id) => Object.assign(state.items[id][0], { quantity: null })],
+    ['a trip with no members', (state, id) => Object.assign(state.trips[id], { members: [] })],
+    [
+      'a trip that ends before it starts',
+      (state, id) => Object.assign(state.trips[id], { endDate: '2026-05-01' }),
+    ],
+  ])('starts empty when the saved blob has %s', (_label, corrupt) => {
+    const { mem, tripId } = setup();
+    const blob = JSON.parse(mem.map.get('packsmart') ?? '') as { state: SavedState };
+    corrupt(blob.state, tripId);
+    mem.map.set('packsmart', JSON.stringify(blob));
+
+    const reopened = createTripStore(() => mem.storage);
+
+    expect(reopened.getState().trips).toEqual({});
+    expect(reopened.getState().items).toEqual({});
   });
 
   it('restores the same trip and items in a new store on the same storage', () => {

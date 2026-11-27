@@ -915,6 +915,13 @@ describe('second reviewer pass', () => {
     expect(quantityOf(findRule(BASE_RULES, 'bottoms'), business(10))).toBe(1);
   });
 
+  it('city walking shoes ask for good grip only when freezing', () => {
+    const shoes = findRule(TRIP_TYPE_RULES.city, 'walking-shoes');
+    const freezing = weather({ minTemp: -5, maxTemp: 2 });
+    expect(reasonOf(shoes, ctxFromTrip(trip(), freezing))).toContain('good grip');
+    expect(reasonOf(shoes, ctxFromTrip(trip(), cold))).not.toContain('good grip');
+  });
+
   it('city walking shoes mention a waterproof pair when wet or cold, not when dry and mild', () => {
     const shoes = findRule(TRIP_TYPE_RULES.city, 'walking-shoes');
     expect(reasonOf(shoes, ctxFromTrip(trip(), rainy))).toContain('waterproof');

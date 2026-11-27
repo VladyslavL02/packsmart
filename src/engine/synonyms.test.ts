@@ -95,6 +95,7 @@ describe('RULE_SYNONYMS', () => {
 
   it.each([
     ['trousers', ['pants', 'jeans']],
+    ['hiking-daypack', ['day pack', 'day bag', 'backpack', 'small backpack']],
     ['closed-shoes', ['trainers', 'sneakers', 'walking shoes', 'comfortable shoes']],
     ['hand-sanitizer', ['sanitizer', 'sanitiser', 'hand gel']],
     ['drivers-licence', ['driving licence', 'driving license', "driver's license", 'drivers license']],

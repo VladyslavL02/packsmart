@@ -32,3 +32,6 @@ PLAN.md
 
 # change-verifier commit gate marker
 .claude/.verified-diff
+
+# Playwright MCP screenshots and cache
+.playwright-mcp/
