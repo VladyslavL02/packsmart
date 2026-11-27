@@ -408,43 +408,6 @@ describe('reviewer fixes', () => {
     expect(keys).toContain('warm-hat');
   });
 
-  it('packs camping gear on camping trips only', () => {
-    const gear = [
-      'tent',
-      'sleeping-bag',
-      'sleeping-mat',
-      'camping-stove',
-      'camping-headlamp',
-      'camping-shoes',
-      'camping-towel',
-      'camping-water-bottle',
-      'camping-repellent',
-      'camping-cookware',
-      'lighter',
-    ];
-    const camping = keysIn(generateBasePackingList(trip({ tripType: 'camping' }), weather()));
-    const city = keysIn(generateBasePackingList(trip({ tripType: 'city' }), weather()));
-    for (const key of gear) {
-      expect(camping).toContain(key);
-      expect(city).not.toContain(key);
-    }
-  });
-
-  it('treats camping as an outdoor trip for sun, cold, rain and socks', () => {
-    const list = (summary: WeatherSummary, tripType: 'camping' | 'city' = 'camping') =>
-      generateBasePackingList(trip({ tripType }), summary);
-
-    expect(keysIn(list(weather()))).toEqual(expect.arrayContaining(['sunscreen', 'sun-cap']));
-    const coldRain = keysIn(list(weather({ minTemp: 5, maxTemp: 12, rainDays: 2 })));
-    expect(coldRain).toEqual(expect.arrayContaining(['gloves', 'warm-hat', 'rain-pants']));
-    expect(coldRain).not.toContain('sun-cap');
-
-    const hot = weather({ minTemp: 20, maxTemp: 30 });
-    expect(rowsFor(list(hot), 'socks')[0].quantity).toBeGreaterThan(
-      rowsFor(list(hot, 'city'), 'socks')[0].quantity,
-    );
-  });
-
   it('packs a spare swimsuit from 3 days, one for shorter trips', () => {
     const swimwear = (days: number) =>
       rowsFor(generateBasePackingList(tripOfDays(days, { tripType: 'beach' }), weather()), 'swimwear')[0]

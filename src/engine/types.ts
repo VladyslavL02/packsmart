@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // /add-trip-preset appends to TRIP_TYPES.
-export const TRIP_TYPES = ['city', 'mountains', 'beach', 'business', 'camping'] as const;
+export const TRIP_TYPES = ['city', 'mountains', 'beach', 'business'] as const;
 export const LUGGAGE = ['personal', 'carryOn', 'checked'] as const;
 export const CATEGORIES = [
   'clothing',

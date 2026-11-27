@@ -1,6 +1,6 @@
 import { Backpack, Briefcase, BriefcaseBusiness, Building2 } from 'lucide-react';
 import { Luggage, Mountain, Umbrella } from 'lucide-react';
-import { Baby, FileText, HeartPulse, Package, Plug, Shirt, SprayCan, Tent } from 'lucide-react';
+import { Baby, FileText, HeartPulse, Package, Plug, Shirt, SprayCan } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Category, LuggageType, TripType } from '../engine/types';
 
@@ -13,7 +13,6 @@ export const TRIP_TYPE_META: Record<
   mountains: { label: 'Mountains', subtitle: 'Alpine & trails', icon: Mountain },
   beach: { label: 'Beach', subtitle: 'Warm & swim', icon: Umbrella },
   business: { label: 'Business', subtitle: 'Suits & tech', icon: Briefcase },
-  camping: { label: 'Camping', subtitle: 'Tents & nights out', icon: Tent },
 };
 
 export const LUGGAGE_ICONS: Record<LuggageType, LucideIcon> = {

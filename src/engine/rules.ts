@@ -129,14 +129,11 @@ const underwearQuantity = (ctx: RuleContext) => Math.min(ctx.days + 1, underwear
 
 const warmSocksQuantity = (ctx: RuleContext) => Math.min(ctx.days, 3);
 
-// Mountain and camping trips are spent outdoors: closed shoes all day, and colder, wetter exposure.
-const isOutdoorTrip = (ctx: RuleContext) =>
-  ctx.input.tripType === 'mountains' || ctx.input.tripType === 'camping';
-
-// Flip-flop days on hot or beach trips halve the socks (outdoor trips still need them), and warm
-// socks replace some pairs when freezing.
+// Flip-flop days on hot or beach trips halve the socks (hiking still needs them), and warm socks
+// replace some pairs when freezing.
 const socksQuantity = (ctx: RuleContext) => {
-  const barefootDays = !isOutdoorTrip(ctx) && (ctx.input.tripType === 'beach' || ctx.flags.heat);
+  const barefootDays =
+    ctx.input.tripType !== 'mountains' && (ctx.input.tripType === 'beach' || ctx.flags.heat);
   const base = barefootDays ? Math.ceil(underwearQuantity(ctx) / 2) : underwearQuantity(ctx);
 
   return ctx.flags.freezing ? Math.max(1, base - warmSocksQuantity(ctx)) : base;
@@ -161,20 +158,20 @@ const freezingReason = (ctx: RuleContext) =>
 const heatReason = (ctx: RuleContext) =>
   withSeasonalNote(ctx, `Highs up to ${degrees(ctx.weather?.maxTemp ?? 0)}`);
 
-// Beach and outdoor trips need sun gear even when the forecast stays below the heat threshold
-// (water reflects the sun, UV is stronger at altitude, and campers are outside all day).
+// Beach and mountain trips need sun gear even when the forecast stays below the heat threshold
+// (water reflects the sun, and UV is stronger at altitude).
 const needsSunProtection = (ctx: RuleContext) =>
-  ctx.flags.heat || ctx.input.tripType === 'beach' || isOutdoorTrip(ctx);
-const sunReason = (ctx: RuleContext) => {
-  if (ctx.flags.heat) {return heatReason(ctx);}
-  if (ctx.input.tripType === 'mountains') {return 'Stronger sun at altitude';}
+  ctx.flags.heat || ctx.input.tripType === 'beach' || ctx.input.tripType === 'mountains';
+const sunReason = (ctx: RuleContext) =>
+  ctx.flags.heat
+    ? heatReason(ctx)
+    : ctx.input.tripType === 'mountains'
+      ? 'Stronger sun at altitude'
+      : 'Sun exposure on a beach trip';
 
-  return ctx.input.tripType === 'camping' ? 'Long days outdoors' : 'Sun exposure on a beach trip';
-};
-
-// Outdoor trips get cold hands and ears well above freezing, especially in rain or at night.
+// Mountain trips get cold hands and ears well above freezing, especially in rain.
 const needsHandsAndHead = (ctx: RuleContext) =>
-  ctx.flags.freezing || (ctx.flags.cold && isOutdoorTrip(ctx));
+  ctx.flags.freezing || (ctx.flags.cold && ctx.input.tripType === 'mountains');
 
 const onlyWithBags = (ctx: RuleContext) =>
   hasLuggage(ctx, 'checked') && (hasLuggage(ctx, 'carryOn') || hasLuggage(ctx, 'personal'));
@@ -306,7 +303,7 @@ export const WEATHER_RULES: Rule[] = [
     title: 'Rain trousers',
     category: 'clothing',
     appliesTo: 'everyone',
-    when: (ctx) => ctx.flags.rain && isOutdoorTrip(ctx),
+    when: (ctx) => ctx.flags.rain && ctx.input.tripType === 'mountains',
     reason: rainReason,
   },
   {
@@ -493,91 +490,6 @@ export const TRIP_TYPE_RULES: Record<TripType, Rule[]> = {
     { key: 'dress-shoes', title: 'Dress shoes', category: 'clothing', appliesTo: 'adult' },
     { key: 'casual-shoes', title: 'Casual shoes', category: 'clothing', appliesTo: 'adult' },
     { key: 'laptop-bag', title: 'Laptop bag', category: 'misc', appliesTo: 'adult' },
-  ],
-  camping: [
-    {
-      key: 'tent',
-      title: 'Tent',
-      category: 'misc',
-      appliesTo: 'shared',
-      reason: 'Check pegs and poles before you leave',
-    },
-    {
-      key: 'sleeping-bag',
-      title: 'Sleeping bag',
-      category: 'misc',
-      appliesTo: 'everyone',
-      reason: 'Pick one rated for the night temperature',
-    },
-    {
-      key: 'sleeping-mat',
-      title: 'Sleeping mat',
-      category: 'misc',
-      appliesTo: 'everyone',
-      reason: 'Insulates you from the ground',
-    },
-    {
-      key: 'camping-stove',
-      title: 'Camping stove',
-      category: 'misc',
-      appliesTo: 'shared',
-      reason: 'Buy fuel there if you are flying',
-    },
-    {
-      key: 'camping-headlamp',
-      title: 'Headlamp',
-      category: 'electronics',
-      appliesTo: 'everyone',
-      reason: 'Campsites are dark at night',
-    },
-    {
-      key: 'camping-shoes',
-      title: 'Sturdy closed shoes',
-      category: 'clothing',
-      appliesTo: 'everyone',
-      reason: (ctx) => {
-        if (ctx.flags.rain) {return 'Uneven, wet ground: bring a waterproof pair';}
-
-        return ctx.flags.cold
-          ? 'Cold, uneven ground: bring a warm pair'
-          : 'For uneven ground around the campsite';
-      },
-    },
-    {
-      key: 'camping-towel',
-      title: 'Quick-dry towel',
-      category: 'misc',
-      appliesTo: 'everyone',
-      reason: 'Campsites rarely provide towels',
-    },
-    {
-      key: 'camping-water-bottle',
-      title: 'Water bottle',
-      category: 'misc',
-      appliesTo: 'everyone',
-      reason: 'Taps can be far from your pitch',
-    },
-    {
-      key: 'camping-repellent',
-      title: 'Insect repellent',
-      category: 'toiletries',
-      appliesTo: 'shared',
-      reason: 'Evenings outdoors attract insects',
-    },
-    {
-      key: 'camping-cookware',
-      title: 'Cookware & utensils',
-      category: 'misc',
-      appliesTo: 'shared',
-      reason: 'For cooking and eating at the site',
-    },
-    {
-      key: 'lighter',
-      title: 'Lighter / matches',
-      category: 'misc',
-      appliesTo: 'shared',
-      reason: 'Check airline rules if you are flying',
-    },
   ],
 };
 

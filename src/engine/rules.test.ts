@@ -621,19 +621,6 @@ describe('TRIP_TYPE_RULES', () => {
       'casual-shoes',
       'laptop-bag',
     ],
-    camping: [
-      'tent',
-      'sleeping-bag',
-      'sleeping-mat',
-      'camping-stove',
-      'camping-headlamp',
-      'camping-shoes',
-      'camping-towel',
-      'camping-water-bottle',
-      'camping-repellent',
-      'camping-cookware',
-      'lighter',
-    ],
   };
 
   it.each(Object.entries(EXPECTED))('%s has exactly the expected rule keys', (type, keys) => {

@@ -391,22 +391,94 @@ describe('tripStore', () => {
   });
 
   it.each<[string, (state: SavedState, tripId: string) => void]>([
-    ['an item with a null quantity', (state, id) => Object.assign(state.items[id][0], { quantity: null })],
     ['a trip with no members', (state, id) => Object.assign(state.trips[id], { members: [] })],
     [
       'a trip that ends before it starts',
       (state, id) => Object.assign(state.trips[id], { endDate: '2026-05-01' }),
     ],
-  ])('starts empty when the saved blob has %s', (_label, corrupt) => {
-    const { mem, tripId } = setup();
+    ['a trip type that no longer exists', (state, id) => Object.assign(state.trips[id], { tripType: 'camping' })],
+  ])('drops only the trip with %s, keeps the others and backs up the blob', (_label, corrupt) => {
+    const { mem, store, tripId } = setup();
+    const otherId = store.getState().createTrip(trip, weather);
+    const otherRows = store.getState().items[otherId];
+    store.getState().setCurrentMember(tripId, 'a1');
     const blob = JSON.parse(mem.map.get('packsmart') ?? '') as { state: SavedState };
     corrupt(blob.state, tripId);
+    const saved = JSON.stringify(blob);
+    mem.map.set('packsmart', saved);
+
+    const reopened = createTripStore(() => mem.storage);
+
+    expect(Object.keys(reopened.getState().trips)).toEqual([otherId]);
+    expect(reopened.getState().items).toEqual({ [otherId]: otherRows });
+    expect(reopened.getState().currentMember).toEqual({});
+    expect(mem.map.get('packsmart-backup')).toBe(JSON.stringify(blob.state));
+  });
+
+  it('drops only an invalid row and keeps its trip', () => {
+    const { mem, tripId, rows } = setup();
+    const before = rows();
+    const blob = JSON.parse(mem.map.get('packsmart') ?? '') as { state: SavedState };
+    Object.assign(blob.state.items[tripId][0], { quantity: null });
     mem.map.set('packsmart', JSON.stringify(blob));
 
     const reopened = createTripStore(() => mem.storage);
 
-    expect(reopened.getState().trips).toEqual({});
-    expect(reopened.getState().items).toEqual({});
+    expect(reopened.getState().trips[tripId]).toBeDefined();
+    expect(reopened.getState().items[tripId]).toEqual(before.slice(1));
+    expect(mem.map.has('packsmart-backup')).toBe(true);
+  });
+
+  it.each([
+    ['trips saved as an array', JSON.stringify({ state: { trips: [], items: {}, currentMember: {}, aiStatus: {} }, version: 1 }), JSON.stringify({ trips: [], items: {}, currentMember: {}, aiStatus: {} })],
+    ['non-JSON text', 'not json {', 'not json {'],
+  ])('backs up the saved data before discarding %s', (_label, saved, backup) => {
+    const mem = memoryStorage();
+    mem.map.set('packsmart', saved);
+
+    const store = createTripStore(() => mem.storage);
+
+    expect(store.getState().trips).toEqual({});
+    expect(mem.map.get('packsmart-backup')).toBe(backup);
+  });
+
+  it('writes no backup when everything saved is valid', () => {
+    const { mem } = setup();
+
+    createTripStore(() => mem.storage);
+
+    expect(mem.map.has('packsmart-backup')).toBe(false);
+  });
+
+  it('forgets a saved current member who is not on the trip', () => {
+    const { mem, store, tripId } = setup();
+    store.getState().setCurrentMember(tripId, 'ghost');
+
+    const reopened = createTripStore(() => mem.storage);
+
+    expect(reopened.getState().currentMember).toEqual({});
+  });
+
+  it('keeps saved trips when the saved version differs', () => {
+    const { mem, tripId } = setup();
+    const blob = JSON.parse(mem.map.get('packsmart') ?? '') as { version: number };
+    blob.version = 0;
+    mem.map.set('packsmart', JSON.stringify(blob));
+
+    const reopened = createTripStore(() => mem.storage);
+
+    expect(reopened.getState().trips[tripId]).toBeDefined();
+  });
+
+  it('keeps working in memory when storage refuses to save', () => {
+    const { mem, store, tripId, rows } = setup();
+    const { id } = rows()[0];
+    mem.storage.setItem = () => {
+      throw new Error('QuotaExceededError');
+    };
+
+    expect(() => store.getState().togglePacked(tripId, id)).not.toThrow();
+    expect(rows()[0].isPacked).toBe(true);
   });
 
   it('restores the same trip and items in a new store on the same storage', () => {
