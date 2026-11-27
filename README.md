@@ -15,6 +15,17 @@ Set these in `.env.local` (never commit it):
 - `VITE_SUPABASE_ANON_KEY`
 - `GEMINI_API_KEY` (server only, used by `api/suggest.ts`)
 
+## Sync & storage
+
+Supabase is the source of truth for trips and packing items. Open tabs and other devices showing the same trip link get changes through Realtime.
+
+Each browser keeps only its own Recent trips list, the "I am" choice and the AI suggestion status in localStorage, so these don't follow you to another device.
+
+Known limits:
+
+- Two tabs pressing Retry at once can add duplicate AI items. Delete the extra one.
+- Offline edits are not queued. If a save fails, the app tries to reload the list and shows "Couldn't save".
+
 ## Data access & security
 
 PackSmart has no sign-in. A trip is reached through its unguessable link (the trip's random uuid), so access is "anyone with the link", not real scoping by user or `trip_id`.
