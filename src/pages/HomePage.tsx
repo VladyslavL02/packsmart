@@ -80,9 +80,10 @@ export function HomePage() {
         : weatherState;
       if (!mounted.current) {return;}
       const id = await createTrip(input, weather);
-      navigate(`/trip/${id}`);
       // Not awaited: the list shows at once and the AI rows arrive later.
       void runAiSuggestions(id);
+      // Leaving while the insert ran must not pull the user back; the trip is in Recent.
+      if (mounted.current) {navigate(`/trip/${id}`);}
     } catch (cause) {
       console.warn('[home] could not create the trip:', cause);
       setError("Couldn't save the trip. Check your connection and try again.");

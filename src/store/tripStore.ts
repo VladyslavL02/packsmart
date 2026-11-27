@@ -58,6 +58,8 @@ type TripActions = {
   markCategoryPacked: (tripId: string, category: Category, itemIds?: string[]) => void;
   setCurrentMember: (tripId: string, memberId: string) => void;
   touchTrip: (tripId: string) => void;
+  /** Drops the saved preferences of trips that no longer exist. */
+  forgetTrips: (tripIds: string[]) => void;
   /** Also the Retry action: sends the current rows and appends only the new AI ones. */
   runAiSuggestions: (tripId: string) => Promise<void>;
 };
@@ -383,6 +385,17 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
           touchTrip: (tripId) => {
             if (!get().trips[tripId]) {return;}
             set((state) => ({ recent: { ...state.recent, [tripId]: new Date().toISOString() } }));
+          },
+
+          forgetTrips: (tripIds) => {
+            const gone = new Set(tripIds);
+            const keep = <T>(record: Record<string, T>) =>
+              Object.fromEntries(Object.entries(record).filter(([id]) => !gone.has(id)));
+            set((state) => ({
+              currentMember: keep(state.currentMember),
+              aiStatus: keep(state.aiStatus),
+              recent: keep(state.recent),
+            }));
           },
 
           // Lives in the store, not a component, so navigating away doesn't cancel it.

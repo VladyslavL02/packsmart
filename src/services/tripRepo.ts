@@ -112,6 +112,9 @@ export async function deleteItem(id: string): Promise<void> {
 }
 
 export function subscribeToTrip(tripId: string, handlers: TripHandlers): () => void {
+  // As in fetchTrip: such an id has no rows, and would make a broken filter.
+  if (!UUID.test(tripId)) {return () => {};}
+
   const changes = { schema: 'public', table: 'packing_items' } as const;
   const filter = `trip_id=eq.${tripId}`;
   const upsert = (payload: { new: unknown }) => {

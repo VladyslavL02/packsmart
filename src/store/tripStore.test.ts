@@ -808,6 +808,43 @@ describe('tripStore', () => {
 
       expect(store.getState().recent).toEqual({ [tripId]: NOW });
     });
+
+    const preferences = (...ids: string[]) => ({
+      currentMember: Object.fromEntries(ids.map((id) => [id, 'a1'])),
+      aiStatus: Object.fromEntries(ids.map((id) => [id, 'ok'])),
+      recent: Object.fromEntries(ids.map((id) => [id, NOW])),
+    });
+    const remembering = (...ids: string[]) =>
+      emptyStore(JSON.stringify({ state: preferences(...ids), version: 2 }));
+
+    it('forgets only the given trips in recent, currentMember and aiStatus', () => {
+      const { store } = remembering('t1', 't2', 't3');
+
+      store.getState().forgetTrips(['t1', 't3']);
+
+      const { currentMember, aiStatus, recent } = store.getState();
+      expect({ currentMember, aiStatus, recent }).toStrictEqual(preferences('t2'));
+    });
+
+    it('removes forgotten trips from the persisted blob', () => {
+      const { mem, store } = remembering('t1', 't2');
+
+      store.getState().forgetTrips(['t1']);
+
+      expect(savedBlob(mem)).toStrictEqual({ state: preferences('t2'), version: 2 });
+    });
+
+    it.each([
+      ['unknown ids', ['no-trip']],
+      ['an empty array', []],
+    ])('leaves the state unchanged when forgetting %s', (_label, ids) => {
+      const { store } = remembering('t1', 't2');
+      const before = store.getState();
+
+      store.getState().forgetTrips(ids);
+
+      expect(store.getState()).toEqual(before);
+    });
   });
 
   describe('persistence', () => {

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { Button } from '../components/atoms/Button';
 import { Card } from '../components/atoms/Card';
+import { Skeleton } from '../components/atoms/Skeleton';
+import { SaveErrorToast } from '../components/molecules/SaveErrorToast';
 import { AiStatusRow } from '../components/organisms/AiStatusRow';
 import { CategorySection } from '../components/organisms/CategorySection';
 import { FilterBar } from '../components/organisms/FilterBar';
@@ -19,24 +22,59 @@ import type { ItemFilter } from '../engine/listView';
 import type { PackingItem } from '../engine/types';
 import { formatDateRange } from '../lib/format';
 import { CATEGORY_META, TRIP_TYPE_META } from '../lib/tripMeta';
+import { subscribeToTrip } from '../services/tripRepo';
 import { MAX_QUANTITY, useTripStore } from '../store/tripStore';
 
 // One shared array: a selector returning a fresh [] each time would loop.
 const NO_ITEMS: PackingItem[] = [];
 
+function HomeLink() {
+  return (
+    <Link
+      to="/"
+      className="rounded-base bg-primary-container px-4 py-2 font-semibold
+        text-on-primary-container hover:bg-primary"
+    >
+      Plan a trip
+    </Link>
+  );
+}
+
 function TripNotFound() {
   return (
     <Card className="flex flex-col items-center gap-3 p-8 text-center">
       <h1 className="text-xl font-semibold tracking-tight">Trip not found</h1>
-      <p className="text-sm text-on-surface-variant">This trip isn't saved on this device.</p>
-      <Link
-        to="/"
-        className="rounded-base bg-primary-container px-4 py-2 font-semibold
-          text-on-primary-container hover:bg-primary"
-      >
-        Plan a trip
-      </Link>
+      <p className="text-sm text-on-surface-variant">This link doesn't match a saved trip.</p>
+      <HomeLink />
     </Card>
+  );
+}
+
+function TripLoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Card className="flex flex-col items-center gap-3 p-8 text-center">
+      <h1 className="text-xl font-semibold tracking-tight">Couldn't load this trip</h1>
+      <p className="text-sm text-on-surface-variant">Check your connection and try again.</p>
+      <Button onClick={onRetry}>Retry</Button>
+      <HomeLink />
+    </Card>
+  );
+}
+
+function TripSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <Skeleton label="Loading trip" className="h-16" />
+      <div className="grid gap-3 md:grid-cols-2" aria-hidden="true">
+        <div className="h-28 animate-pulse rounded-xl bg-surface-container-high" />
+        <div className="h-28 animate-pulse rounded-xl bg-surface-container-high" />
+      </div>
+      <div className="flex flex-col gap-2" aria-hidden="true">
+        {[0, 1, 2].map((row) => (
+          <div key={row} className="h-14 animate-pulse rounded-xl bg-surface-container-high" />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -53,6 +91,8 @@ function TripView({ tripId }: { tripId: string }) {
   const setCurrentMember = useTripStore((state) => state.setCurrentMember);
   const touchTrip = useTripStore((state) => state.touchTrip);
   const runAiSuggestions = useTripStore((state) => state.runAiSuggestions);
+  const saveError = useTripStore((state) => state.saveError);
+  const clearSaveError = useTripStore((state) => state.clearSaveError);
   const [filter, setFilter] = useState<ItemFilter>('all');
   const [unpackedOnly, setUnpackedOnly] = useState(false);
 
@@ -129,17 +169,42 @@ function TripView({ tripId }: { tripId: string }) {
         currentMemberId={currentMemberId}
         onAdd={(title, memberId) => addUserItem(tripId, title, memberId)}
       />
+      {saveError && <SaveErrorToast message={saveError} onDismiss={clearSaveError} />}
     </div>
   );
 }
 
 export function TripPage() {
   const { tripId = '' } = useParams();
-
+  const loadTrip = useTripStore((state) => state.loadTrip);
+  const applyRemoteUpsert = useTripStore((state) => state.applyRemoteUpsert);
+  const applyRemoteDelete = useTripStore((state) => state.applyRemoteDelete);
+  const clearSaveError = useTripStore((state) => state.clearSaveError);
   // hasOwn: /trip/constructor must not find an inherited property.
   const exists = useTripStore((state) => Object.hasOwn(state.trips, tripId));
-  if (!exists) {return <TripNotFound />;}
+  const load = useTripStore((state) =>
+    Object.hasOwn(state.load, tripId) ? state.load[tripId] : undefined,
+  );
+
+  // Reloads even a trip already in memory: changes made while away weren't received.
+  useEffect(() => {
+    // Subscribe first, so a change made during the fetch isn't missed.
+    const unsubscribe = subscribeToTrip(tripId, {
+      onUpsert: applyRemoteUpsert,
+      onDelete: applyRemoteDelete,
+    });
+    void loadTrip(tripId);
+
+    return () => {
+      unsubscribe();
+      clearSaveError();
+    };
+  }, [tripId, loadTrip, applyRemoteUpsert, applyRemoteDelete, clearSaveError]);
 
   // Keyed, so filters and the quick-add draft don't carry over between trips.
-  return <TripView key={tripId} tripId={tripId} />;
+  if (exists) {return <TripView key={tripId} tripId={tripId} />;}
+  if (load === 'missing') {return <TripNotFound />;}
+  if (load === 'error') {return <TripLoadError onRetry={() => void loadTrip(tripId)} />;}
+
+  return <TripSkeleton />;
 }

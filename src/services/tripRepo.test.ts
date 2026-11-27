@@ -294,7 +294,7 @@ describe('subscribeToTrip', () => {
   type Filter = { event: string; schema: string; table: string; filter?: string };
   type Listener = (payload: { new: unknown; old: unknown }) => void;
 
-  const subscribe = () => {
+  const subscribe = (tripId = TRIP_ID) => {
     const listeners: { type: string; filter: Filter; callback: Listener }[] = [];
     const channel = {
       on: vi.fn((type: string, filter: Filter, callback: Listener) => {
@@ -306,7 +306,7 @@ describe('subscribeToTrip', () => {
     };
     vi.mocked(supabase.channel).mockReturnValue(channel as never);
     const handlers = { onUpsert: vi.fn(), onDelete: vi.fn() };
-    const unsubscribe = subscribeToTrip(TRIP_ID, handlers);
+    const unsubscribe = subscribeToTrip(tripId, handlers);
     const listener = (event: string) => {
       const found = listeners.find((entry) => entry.filter.event === event);
       if (!found) {throw new Error(`no ${event} listener`);}
@@ -390,4 +390,20 @@ describe('subscribeToTrip', () => {
     }
     expect(names[0]).not.toBe(names[1]);
   });
+
+  it.each(['constructor', 'not-a-uuid'])('opens no channel for the non-UUID id %s', (id) => {
+    subscribe(id);
+
+    expect(supabase.channel).not.toHaveBeenCalled();
+  });
+
+  it.each(['constructor', 'not-a-uuid'])(
+    'returns a safe no-op unsubscribe for the non-UUID id %s',
+    (id) => {
+      const { unsubscribe } = subscribe(id);
+
+      expect(unsubscribe).not.toThrow();
+      expect(supabase.removeChannel).not.toHaveBeenCalled();
+    },
+  );
 });
