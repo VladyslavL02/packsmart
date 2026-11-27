@@ -79,13 +79,13 @@ export function HomePage() {
         ? await getTripWeather(input)
         : weatherState;
       if (!mounted.current) {return;}
-      const id = createTrip(input, weather);
+      const id = await createTrip(input, weather);
       navigate(`/trip/${id}`);
       // Not awaited: the list shows at once and the AI rows arrive later.
       void runAiSuggestions(id);
     } catch (cause) {
       console.warn('[home] could not create the trip:', cause);
-      setError('Could not create the list. Check the form and try again.');
+      setError("Couldn't save the trip. Check your connection and try again.");
       setBusy(false);
     }
   };

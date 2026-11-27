@@ -1,13 +1,44 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StateStorage } from 'zustand/middleware';
 import { generateBasePackingList } from '../engine/generator';
-import type { AiSuggestion, SuggestResponse, TripInput, WeatherSummary } from '../engine/types';
+import type {
+  AiSuggestion,
+  PackingItem,
+  SuggestResponse,
+  TripInput,
+  WeatherSummary,
+} from '../engine/types';
 import { fetchAiSuggestions } from '../services/suggestApi';
+import {
+  deleteItem,
+  fetchTrip,
+  fetchTripSummaries,
+  insertItems,
+  insertTripWithItems,
+  subscribeToTrip,
+  updateItem,
+  updateItems,
+} from '../services/tripRepo';
+import type { SavedTrip } from '../services/tripRows';
 import { createTripStore } from './tripStore';
 
 vi.mock('../services/suggestApi', () => ({ fetchAiSuggestions: vi.fn() }));
+// A factory, so the real module (and the Supabase client behind it) is never imported.
+vi.mock('../services/tripRepo', () => ({
+  insertTripWithItems: vi.fn(),
+  insertItems: vi.fn(),
+  fetchTrip: vi.fn(),
+  updateItem: vi.fn(),
+  updateItems: vi.fn(),
+  deleteItem: vi.fn(),
+  fetchTripSummaries: vi.fn(),
+  subscribeToTrip: vi.fn(),
+}));
 
 const NOW = '2026-05-20T10:00:00.000Z';
+const LATER = '2026-05-21T08:00:00.000Z';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SERVER_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 
 const trip: TripInput = {
   city: 'Lisbon',
@@ -38,6 +69,29 @@ const weather: WeatherSummary = {
   source: 'forecast',
 };
 
+const savedTrip = (overrides: Partial<SavedTrip> = {}): SavedTrip => ({
+  ...familyTrip,
+  id: SERVER_TRIP_ID,
+  weather,
+  createdAt: NOW,
+  ...overrides,
+});
+
+const item = (overrides: Partial<PackingItem> = {}): PackingItem => ({
+  id: 'row-1',
+  tripId: SERVER_TRIP_ID,
+  key: null,
+  title: 'Server socks',
+  category: 'clothing',
+  scope: 'shared',
+  memberId: null,
+  quantity: 1,
+  source: 'rules',
+  isPacked: false,
+  reason: null,
+  ...overrides,
+});
+
 const suggestion = (overrides: Partial<AiSuggestion> = {}): AiSuggestion => ({
   title: 'Phrasebook',
   category: 'misc',
@@ -47,13 +101,29 @@ const suggestion = (overrides: Partial<AiSuggestion> = {}): AiSuggestion => ({
   ...overrides,
 });
 
-type SavedState = {
-  trips: Record<string, object>;
-  items: Record<string, object[]>;
-};
+const fetchMock = vi.mocked(fetchAiSuggestions);
+const insertTripMock = vi.mocked(insertTripWithItems);
+const insertItemsMock = vi.mocked(insertItems);
+const fetchTripMock = vi.mocked(fetchTrip);
+const updateItemMock = vi.mocked(updateItem);
+const updateItemsMock = vi.mocked(updateItems);
+const deleteItemMock = vi.mocked(deleteItem);
 
-function memoryStorage() {
+function resetMocks() {
+  fetchMock.mockReset();
+  insertTripMock.mockReset().mockImplementation(async (saved) => saved);
+  insertItemsMock.mockReset().mockResolvedValue(undefined);
+  fetchTripMock.mockReset().mockResolvedValue(null);
+  updateItemMock.mockReset().mockResolvedValue(undefined);
+  updateItemsMock.mockReset().mockResolvedValue(undefined);
+  deleteItemMock.mockReset().mockResolvedValue(undefined);
+  vi.mocked(fetchTripSummaries).mockReset().mockResolvedValue([]);
+  vi.mocked(subscribeToTrip).mockReset().mockReturnValue(() => undefined);
+}
+
+function memoryStorage(saved?: string) {
   const map = new Map<string, string>();
+  if (saved !== undefined) {map.set('packsmart', saved);}
   const storage: StateStorage = {
     getItem: (name) => map.get(name) ?? null,
     setItem: (name, value) => {
@@ -67,29 +137,77 @@ function memoryStorage() {
   return { map, storage };
 }
 
-function setup(input: TripInput = familyTrip) {
-  const mem = memoryStorage();
+function emptyStore(saved?: string) {
+  const mem = memoryStorage(saved);
   const store = createTripStore(() => mem.storage);
-  const tripId = store.getState().createTrip(input, weather);
+
+  return { mem, store };
+}
+
+async function setup(input: TripInput = familyTrip) {
+  const { mem, store } = emptyStore();
+  const tripId = await store.getState().createTrip(input, weather);
   const rows = () => store.getState().items[tripId];
 
   return { mem, store, tripId, rows };
 }
 
-function deferredResponse() {
-  let resolve!: (value: SuggestResponse) => void;
-  const promise = new Promise<SuggestResponse>((done) => {
-    resolve = done;
-  });
-
-  return { promise, resolve };
+function savedBlob(mem: ReturnType<typeof memoryStorage>) {
+  return JSON.parse(mem.map.get('packsmart') ?? 'null') as {
+    state: Record<string, unknown>;
+    version: number;
+  };
 }
 
-const fetchMock = vi.mocked(fetchAiSuggestions);
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+
+  return { promise, resolve, reject };
+}
+
+// Every mock settles on the microtask queue, so one macrotask drains whole write/recover chains.
+const flush = () => new Promise<void>((done) => setTimeout(done, 0));
+
+type Setup = Awaited<ReturnType<typeof setup>>;
+
+const writes: [string, () => void, (ctx: Setup) => void][] = [
+  [
+    'togglePacked',
+    () => updateItemMock.mockRejectedValue(new Error('offline')),
+    ({ store, tripId, rows }) => store.getState().togglePacked(tripId, rows()[0].id),
+  ],
+  [
+    'setQuantity',
+    () => updateItemMock.mockRejectedValue(new Error('offline')),
+    ({ store, tripId, rows }) => store.getState().setQuantity(tripId, rows()[0].id, 3),
+  ],
+  [
+    'deleteItem',
+    () => deleteItemMock.mockRejectedValue(new Error('offline')),
+    ({ store, tripId, rows }) => store.getState().deleteItem(tripId, rows()[0].id),
+  ],
+  [
+    'markCategoryPacked',
+    () => updateItemsMock.mockRejectedValue(new Error('offline')),
+    ({ store, tripId }) => store.getState().markCategoryPacked(tripId, 'clothing'),
+  ],
+  [
+    'addUserItem',
+    () => insertItemsMock.mockRejectedValue(new Error('offline')),
+    ({ store, tripId }) => {
+      store.getState().addUserItem(tripId, 'Lucky charm', null);
+    },
+  ],
+];
 
 describe('tripStore', () => {
   beforeEach(() => {
-    fetchMock.mockReset();
+    resetMocks();
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(NOW));
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -100,407 +218,723 @@ describe('tripStore', () => {
     vi.restoreAllMocks();
   });
 
-  it('creates a trip with unpacked rules rows and no AI request', () => {
-    const { store, tripId, rows } = setup();
+  describe('createTrip', () => {
+    it('inserts the trip with unpacked rules rows under client UUIDs and no AI request', async () => {
+      const { store } = emptyStore();
 
-    expect(tripId).toEqual(expect.any(String));
-    expect(rows()).toHaveLength(generateBasePackingList(familyTrip, weather).length);
-    expect(rows().length).toBeGreaterThan(0);
-    expect(new Set(rows().map((row) => row.id)).size).toBe(rows().length);
-    for (const row of rows()) {
-      expect(row).toMatchObject({ tripId, isPacked: false, source: 'rules' });
-    }
-    expect(store.getState().trips[tripId]).toMatchObject({
-      id: tripId,
-      city: 'Lisbon',
-      createdAt: NOW,
-      lastOpenedAt: NOW,
+      const id = await store.getState().createTrip(familyTrip, weather);
+
+      expect(id).toMatch(UUID);
+      expect(insertTripMock).toHaveBeenCalledTimes(1);
+      const [sentTrip, sentRows] = insertTripMock.mock.calls[0];
+      expect(sentTrip).toEqual({ ...familyTrip, id, weather, createdAt: NOW });
+      expect(sentRows).toHaveLength(generateBasePackingList(familyTrip, weather).length);
+      expect(sentRows.length).toBeGreaterThan(0);
+      expect(new Set(sentRows.map((row) => row.id)).size).toBe(sentRows.length);
+      for (const row of sentRows) {
+        expect(row.id).toMatch(UUID);
+        expect(row).toMatchObject({ tripId: id, isPacked: false, source: 'rules' });
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
     });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 
-  it.each([
-    [0, 1],
-    [-3, 1],
-    [Number.NaN, 1],
-    [Number.POSITIVE_INFINITY, 1],
-    [4, 4],
-    [99, 99],
-    [100, 99],
-    [1e20, 99],
-  ])('stores quantity %s as %s and keeps the source', (input, expected) => {
-    const { store, tripId, rows } = setup();
-    const { id } = rows()[0];
-    store.getState().setQuantity(tripId, id, 7);
+    it('stores the trip, rows, ready state and recent time after the insert succeeds', async () => {
+      const { store } = emptyStore();
 
-    store.getState().setQuantity(tripId, id, input);
+      const id = await store.getState().createTrip(familyTrip, weather);
 
-    expect(rows()[0]).toMatchObject({ id, quantity: expected, source: 'rules' });
-  });
+      const state = store.getState();
+      expect(state.trips).toEqual({ [id]: { ...familyTrip, id, weather, createdAt: NOW } });
+      expect(state.items[id]).toEqual(insertTripMock.mock.calls[0]?.[1]);
+      expect(state.load[id]).toBe('ready');
+      expect(state.recent).toEqual({ [id]: NOW });
+    });
 
-  it('rejects a trip with no members and saves nothing', () => {
-    const { mem, store } = setup();
-    const saved = mem.map.get('packsmart');
+    it('keeps nothing in the store while the insert is pending', async () => {
+      const { store } = emptyStore();
+      const insert = deferred<SavedTrip>();
+      insertTripMock.mockReturnValue(insert.promise);
 
-    expect(() => store.getState().createTrip({ ...trip, members: [] }, weather)).toThrow();
+      const pending = store.getState().createTrip(familyTrip, weather);
+      await flush();
 
-    expect(Object.keys(store.getState().trips)).toHaveLength(1);
-    expect(mem.map.get('packsmart')).toBe(saved);
-  });
+      expect(store.getState().trips).toEqual({});
+      expect(store.getState().items).toEqual({});
+      expect(store.getState().recent).toEqual({});
 
-  it('sets and overwrites the current member for one trip only', () => {
-    const { store, tripId } = setup();
-    const otherId = store.getState().createTrip(familyTrip, weather);
-    store.getState().setCurrentMember(otherId, 'a2');
+      insert.resolve(insertTripMock.mock.calls[0][0]);
+      const id = await pending;
 
-    store.getState().setCurrentMember(tripId, 'a1');
-    store.getState().setCurrentMember(tripId, 'c1');
+      expect(store.getState().trips[id]).toBeDefined();
+    });
 
-    expect(store.getState().currentMember).toEqual({ [tripId]: 'c1', [otherId]: 'a2' });
-  });
+    it('rejects invalid input without inserting', async () => {
+      const { store } = emptyStore();
 
-  it('updates lastOpenedAt on touch and ignores an unknown trip', () => {
-    const { store, tripId } = setup();
-    const before = store.getState().trips[tripId];
-    const later = '2026-05-21T08:00:00.000Z';
-    vi.setSystemTime(new Date(later));
+      await expect(
+        store.getState().createTrip({ ...trip, members: [] }, weather),
+      ).rejects.toThrow();
 
-    store.getState().touchTrip(tripId);
-    store.getState().touchTrip('no-trip');
+      expect(insertTripMock).not.toHaveBeenCalled();
+      expect(store.getState().trips).toEqual({});
+    });
 
-    expect(store.getState().trips).toEqual({ [tripId]: { ...before, lastOpenedAt: later } });
-  });
+    it('rejects and keeps nothing when the insert fails', async () => {
+      const { mem, store } = emptyStore();
+      insertTripMock.mockRejectedValueOnce(new Error('offline'));
 
-  it('deletes exactly one row and leaves the others unchanged', () => {
-    const { store, tripId, rows } = setup();
-    const before = rows();
+      await expect(store.getState().createTrip(familyTrip, weather)).rejects.toThrow('offline');
 
-    store.getState().deleteItem(tripId, before[1].id);
+      expect(store.getState().trips).toEqual({});
+      expect(store.getState().items).toEqual({});
+      expect(store.getState().load).toEqual({});
+      expect(store.getState().recent).toEqual({});
+      expect(mem.map.get('packsmart') ?? '').not.toContain(NOW);
+    });
 
-    expect(rows()).toEqual(before.filter((_, index) => index !== 1));
-  });
+    it('returns the same id with one insert when called again while pending', async () => {
+      const { store } = emptyStore();
+      const insert = deferred<SavedTrip>();
+      insertTripMock.mockReturnValue(insert.promise);
 
-  it('toggles one row to packed and back', () => {
-    const { store, tripId, rows } = setup();
-    const before = rows();
+      const first = store.getState().createTrip(familyTrip, weather);
+      const second = store.getState().createTrip(familyTrip, weather);
+      await flush();
 
-    store.getState().togglePacked(tripId, before[0].id);
-    expect(rows()).toEqual([{ ...before[0], isPacked: true }, ...before.slice(1)]);
+      expect(insertTripMock).toHaveBeenCalledTimes(1);
+      insert.resolve(insertTripMock.mock.calls[0][0]);
+      const [firstId, secondId] = await Promise.all([first, second]);
+      expect(secondId).toBe(firstId);
+      expect(Object.keys(store.getState().trips)).toEqual([firstId]);
+    });
 
-    store.getState().togglePacked(tripId, before[0].id);
-    expect(rows()).toEqual(before);
-  });
+    it('tries the insert again on a call after a failure', async () => {
+      const { store } = emptyStore();
+      insertTripMock.mockRejectedValueOnce(new Error('offline'));
+      await expect(store.getState().createTrip(familyTrip, weather)).rejects.toThrow('offline');
 
-  it.each([
-    ['a1', 'adult'],
-    ['c1', 'child'],
-    [null, 'shared'],
-  ])('adds a user row for member %s with scope %s', (memberId, scope) => {
-    const { store, tripId, rows } = setup();
-    const count = rows().length;
+      const id = await store.getState().createTrip(familyTrip, weather);
 
-    const added = store.getState().addUserItem(tripId, 'Lucky charm', memberId);
-
-    expect(added).toBe(true);
-    expect(rows()).toHaveLength(count + 1);
-    expect(rows()[count]).toMatchObject({
-      id: expect.any(String),
-      tripId,
-      title: 'Lucky charm',
-      source: 'user',
-      category: 'misc',
-      key: null,
-      scope,
-      memberId,
-      isPacked: false,
+      expect(insertTripMock).toHaveBeenCalledTimes(2);
+      expect(store.getState().trips[id]).toBeDefined();
+      expect(store.getState().load[id]).toBe('ready');
     });
   });
 
-  it('rejects a user item the same member already has, ignoring case and spacing', () => {
-    const { store, tripId, rows } = setup();
-    store.getState().addUserItem(tripId, 'Lucky charm', 'a1');
-    const before = rows();
+  describe('loadTrip', () => {
+    it('shows loading while the fetch is pending', async () => {
+      const { store } = emptyStore();
+      const fetched = deferred<null>();
+      fetchTripMock.mockReturnValue(fetched.promise);
 
-    const added = store.getState().addUserItem(tripId, '  LUCKY   Charm ', 'a1');
+      const pending = store.getState().loadTrip(SERVER_TRIP_ID);
 
-    expect(added).toBe(false);
-    expect(rows()).toEqual(before);
-  });
-
-  it('accepts the same user title for another member and as shared', () => {
-    const { store, tripId, rows } = setup();
-    store.getState().addUserItem(tripId, 'Lucky charm', 'a1');
-    const count = rows().length;
-
-    expect(store.getState().addUserItem(tripId, 'Lucky charm', 'a2')).toBe(true);
-    expect(store.getState().addUserItem(tripId, 'Lucky charm', null)).toBe(true);
-    expect(rows()).toHaveLength(count + 2);
-  });
-
-  it('returns false for an empty title, unknown member or unknown trip', () => {
-    const { store, tripId } = setup();
-    const before = store.getState().items;
-
-    expect(store.getState().addUserItem(tripId, '   ', 'a1')).toBe(false);
-    expect(store.getState().addUserItem(tripId, 'Lucky charm', 'nobody')).toBe(false);
-    expect(store.getState().addUserItem('no-trip', 'Lucky charm', null)).toBe(false);
-    expect(store.getState().items).toEqual(before);
-  });
-
-  it('marks only the rows of the given category as packed', () => {
-    const { store, tripId, rows } = setup();
-
-    store.getState().markCategoryPacked(tripId, 'clothing');
-
-    expect(rows().some((row) => row.category === 'clothing')).toBe(true);
-    expect(rows().some((row) => row.category !== 'clothing')).toBe(true);
-    for (const row of rows()) {
-      expect(row.isPacked).toBe(row.category === 'clothing');
-    }
-  });
-
-  it('marks only the listed rows of the category when itemIds is given', () => {
-    const { store, tripId, rows } = setup();
-    const clothing = rows().filter((row) => row.category === 'clothing');
-    const other = rows().find((row) => row.category !== 'clothing');
-    expect(clothing.length).toBeGreaterThan(1);
-
-    store.getState().markCategoryPacked(tripId, 'clothing', [clothing[0].id, other?.id ?? '']);
-
-    expect(rows().filter((row) => row.isPacked).map((row) => row.id)).toEqual([clothing[0].id]);
-  });
-
-  it('appends only the new AI rows and reports ok', async () => {
-    const { store, tripId, rows } = setup();
-    const before = rows();
-    const existing = before.find((row) => row.memberId === null) ?? before[0];
-    fetchMock.mockResolvedValue({
-      items: [
-        suggestion({ title: existing.title, category: existing.category }),
-        suggestion(),
-      ],
-      status: 'ok',
+      expect(store.getState().load[SERVER_TRIP_ID]).toBe('loading');
+      fetched.resolve(null);
+      await pending;
     });
 
-    await store.getState().runAiSuggestions(tripId);
+    it('stores the fetched trip and items and marks them ready', async () => {
+      const { store } = emptyStore();
+      const data = { trip: savedTrip(), items: [item()] };
+      fetchTripMock.mockResolvedValue(data);
 
-    expect(rows().slice(0, before.length)).toEqual(before);
-    expect(rows().slice(before.length)).toEqual([
-      expect.objectContaining({
-        id: expect.any(String),
+      await store.getState().loadTrip(SERVER_TRIP_ID);
+
+      expect(fetchTripMock).toHaveBeenCalledWith(SERVER_TRIP_ID);
+      expect(store.getState().trips[SERVER_TRIP_ID]).toEqual(data.trip);
+      expect(store.getState().items[SERVER_TRIP_ID]).toEqual(data.items);
+      expect(store.getState().load[SERVER_TRIP_ID]).toBe('ready');
+    });
+
+    it('marks a trip that does not exist as missing', async () => {
+      const { store } = emptyStore();
+
+      await store.getState().loadTrip(SERVER_TRIP_ID);
+
+      expect(store.getState().load[SERVER_TRIP_ID]).toBe('missing');
+      expect(store.getState().trips).toEqual({});
+      expect(store.getState().items).toEqual({});
+    });
+
+    it('marks a failed fetch as error without rejecting', async () => {
+      const { store } = emptyStore();
+      fetchTripMock.mockRejectedValue(new Error('offline'));
+
+      await expect(store.getState().loadTrip(SERVER_TRIP_ID)).resolves.toBeUndefined();
+
+      expect(store.getState().load[SERVER_TRIP_ID]).toBe('error');
+    });
+  });
+
+  describe('item writes', () => {
+    it('toggles one row to packed and back, writing each new value', async () => {
+      const { store, tripId, rows } = await setup();
+      const before = rows();
+
+      store.getState().togglePacked(tripId, before[0].id);
+      expect(rows()).toEqual([{ ...before[0], isPacked: true }, ...before.slice(1)]);
+      await flush();
+      expect(updateItemMock).toHaveBeenLastCalledWith(before[0].id, { isPacked: true });
+
+      store.getState().togglePacked(tripId, before[0].id);
+      expect(rows()).toEqual(before);
+      await flush();
+      expect(updateItemMock).toHaveBeenLastCalledWith(before[0].id, { isPacked: false });
+      expect(updateItemMock).toHaveBeenCalledTimes(2);
+      expect(store.getState().saveError).toBeNull();
+    });
+
+    it.each([
+      [0, 1],
+      [-3, 1],
+      [Number.NaN, 1],
+      [Number.POSITIVE_INFINITY, 1],
+      [4, 4],
+      [4.6, 5],
+      [99, 99],
+      [500, 99],
+      [1e20, 99],
+    ])('stores and writes quantity %s as %s', async (input, expected) => {
+      const { store, tripId, rows } = await setup();
+      const { id } = rows()[0];
+
+      store.getState().setQuantity(tripId, id, input);
+
+      expect(rows()[0]).toMatchObject({ id, quantity: expected, source: 'rules' });
+      await flush();
+      expect(updateItemMock).toHaveBeenCalledWith(id, { quantity: expected });
+    });
+
+    it('removes exactly one row at once and deletes it in the repo', async () => {
+      const { store, tripId, rows } = await setup();
+      const before = rows();
+
+      store.getState().deleteItem(tripId, before[1].id);
+
+      expect(rows()).toEqual(before.filter((_, index) => index !== 1));
+      await flush();
+      expect(deleteItemMock).toHaveBeenCalledTimes(1);
+      expect(deleteItemMock).toHaveBeenCalledWith(before[1].id);
+    });
+
+    it('marks only the category as packed with one write of its unpacked ids', async () => {
+      const { store, tripId, rows } = await setup();
+      const clothing = rows().filter((row) => row.category === 'clothing');
+      expect(clothing.length).toBeGreaterThan(1);
+      expect(rows().length).toBeGreaterThan(clothing.length);
+      store.getState().togglePacked(tripId, clothing[0].id);
+
+      store.getState().markCategoryPacked(tripId, 'clothing');
+
+      for (const row of rows()) {
+        expect(row.isPacked).toBe(row.category === 'clothing');
+      }
+      await flush();
+      expect(updateItemsMock).toHaveBeenCalledTimes(1);
+      const [ids, patch] = updateItemsMock.mock.calls[0];
+      expect([...ids].sort()).toEqual(clothing.slice(1).map((row) => row.id).sort());
+      expect(patch).toEqual({ isPacked: true });
+    });
+
+    it('marks and writes only the listed rows of the category when itemIds is given', async () => {
+      const { store, tripId, rows } = await setup();
+      const clothing = rows().filter((row) => row.category === 'clothing');
+      const other = rows().find((row) => row.category !== 'clothing');
+      expect(clothing.length).toBeGreaterThan(1);
+
+      store.getState().markCategoryPacked(tripId, 'clothing', [clothing[0].id, other?.id ?? '']);
+
+      expect(rows().filter((row) => row.isPacked).map((row) => row.id)).toEqual([clothing[0].id]);
+      await flush();
+      expect(updateItemsMock).toHaveBeenCalledTimes(1);
+      expect(updateItemsMock).toHaveBeenCalledWith([clothing[0].id], { isPacked: true });
+    });
+  });
+
+  describe('addUserItem', () => {
+    it.each([
+      ['a1', 'adult'],
+      ['c1', 'child'],
+      [null, 'shared'],
+    ])('appends and inserts a user row for member %s with scope %s', async (memberId, scope) => {
+      const { store, tripId, rows } = await setup();
+      const count = rows().length;
+
+      const added = store.getState().addUserItem(tripId, 'Lucky charm', memberId);
+
+      expect(added).toBe(true);
+      expect(rows()).toHaveLength(count + 1);
+      expect(rows()[count]).toMatchObject({
+        id: expect.stringMatching(UUID),
         tripId,
-        title: 'Phrasebook',
+        title: 'Lucky charm',
+        source: 'user',
+        category: 'misc',
+        key: null,
+        scope,
+        memberId,
         isPacked: false,
-        source: 'ai',
-      }),
-    ]);
-    expect(new Set(rows().map((row) => row.id)).size).toBe(rows().length);
-    expect(store.getState().aiStatus[tripId]).toBe('ok');
-  });
-
-  it('ignores a second AI request while one is loading', async () => {
-    const { store, tripId } = setup();
-    const response = deferredResponse();
-    fetchMock.mockReturnValue(response.promise);
-
-    const first = store.getState().runAiSuggestions(tripId);
-    const second = store.getState().runAiSuggestions(tripId);
-    await second;
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(store.getState().aiStatus[tripId]).toBe('loading');
-
-    response.resolve({ items: [], status: 'ok' });
-    await first;
-
-    expect(store.getState().aiStatus[tripId]).toBe('ok');
-  });
-
-  it('reports unavailable and adds no rows when the service is unavailable', async () => {
-    const { store, tripId, rows } = setup();
-    const before = rows();
-    fetchMock.mockResolvedValue({ items: [], status: 'unavailable' });
-
-    await store.getState().runAiSuggestions(tripId);
-
-    expect(store.getState().aiStatus[tripId]).toBe('unavailable');
-    expect(rows()).toEqual(before);
-  });
-
-  it('reports unavailable when the AI request rejects', async () => {
-    const { store, tripId, rows } = setup();
-    const before = rows();
-    fetchMock.mockRejectedValue(new Error('boom'));
-
-    await expect(store.getState().runAiSuggestions(tripId)).resolves.toBeUndefined();
-
-    expect(store.getState().aiStatus[tripId]).toBe('unavailable');
-    expect(rows()).toEqual(before);
-  });
-
-  it('keeps a row added while loading and does not add the same title from the AI', async () => {
-    const { store, tripId, rows } = setup();
-    const count = rows().length;
-    const response = deferredResponse();
-    fetchMock.mockReturnValue(response.promise);
-
-    const pending = store.getState().runAiSuggestions(tripId);
-    store.getState().addUserItem(tripId, 'Phrasebook', null);
-    response.resolve({
-      items: [suggestion({ title: 'phrasebook' }), suggestion({ title: 'Pocket map' })],
-      status: 'ok',
+      });
+      await flush();
+      expect(insertItemsMock).toHaveBeenCalledTimes(1);
+      expect(insertItemsMock).toHaveBeenCalledWith([rows()[count]]);
     });
-    await pending;
 
-    expect(rows().slice(count).map((row) => [row.title, row.source])).toEqual([
-      ['Phrasebook', 'user'],
-      ['Pocket map', 'ai'],
-    ]);
+    it('rejects a title the same member already has, ignoring case and spacing', async () => {
+      const { store, tripId, rows } = await setup();
+      store.getState().addUserItem(tripId, 'Lucky charm', 'a1');
+      const before = rows();
+      await flush();
+      insertItemsMock.mockClear();
+
+      const added = store.getState().addUserItem(tripId, '  LUCKY   Charm ', 'a1');
+
+      expect(added).toBe(false);
+      expect(rows()).toEqual(before);
+      await flush();
+      expect(insertItemsMock).not.toHaveBeenCalled();
+    });
+
+    it('accepts the same user title for another member and as shared', async () => {
+      const { store, tripId, rows } = await setup();
+      store.getState().addUserItem(tripId, 'Lucky charm', 'a1');
+      const count = rows().length;
+
+      expect(store.getState().addUserItem(tripId, 'Lucky charm', 'a2')).toBe(true);
+      expect(store.getState().addUserItem(tripId, 'Lucky charm', null)).toBe(true);
+      expect(rows()).toHaveLength(count + 2);
+    });
+
+    it('returns false and inserts nothing for an empty title, unknown member or trip', async () => {
+      const { store, tripId } = await setup();
+      const before = store.getState().items;
+
+      expect(store.getState().addUserItem(tripId, '   ', 'a1')).toBe(false);
+      expect(store.getState().addUserItem(tripId, 'Lucky charm', 'nobody')).toBe(false);
+      expect(store.getState().addUserItem('no-trip', 'Lucky charm', null)).toBe(false);
+
+      expect(store.getState().items).toEqual(before);
+      await flush();
+      expect(insertItemsMock).not.toHaveBeenCalled();
+    });
   });
 
-  it('rehydrates a saved loading status as unavailable', () => {
-    const { mem, tripId } = setup();
-    const blob = JSON.parse(mem.map.get('packsmart') ?? '') as {
-      state: { aiStatus: Record<string, string> };
-      version: number;
-    };
-    expect(blob.version).toBe(1);
-    blob.state.aiStatus = { [tripId]: 'loading' };
-    mem.map.set('packsmart', JSON.stringify(blob));
+  describe('failed writes', () => {
+    it.each(writes)(
+      'replaces the items with the server copy and sets saveError when %s fails',
+      async (_name, failWrite, act) => {
+        const ctx = await setup();
+        const serverRows = [item({ tripId: ctx.tripId })];
+        fetchTripMock.mockResolvedValue({
+          trip: savedTrip({ id: ctx.tripId }),
+          items: serverRows,
+        });
+        failWrite();
 
-    const reopened = createTripStore(() => mem.storage);
+        act(ctx);
+        await flush();
 
-    expect(reopened.getState().aiStatus).toEqual({ [tripId]: 'unavailable' });
-    expect(reopened.getState().trips[tripId]).toBeDefined();
+        expect(fetchTripMock).toHaveBeenCalledWith(ctx.tripId);
+        expect(ctx.rows()).toEqual(serverRows);
+        expect(ctx.store.getState().saveError).toEqual(expect.stringMatching(/\S/));
+      },
+    );
+
+    it.each(writes)(
+      'still sets saveError without throwing when %s and the refetch both fail',
+      async (_name, failWrite, act) => {
+        const ctx = await setup();
+        fetchTripMock.mockRejectedValue(new Error('still offline'));
+        failWrite();
+
+        expect(() => act(ctx)).not.toThrow();
+        await flush();
+
+        expect(fetchTripMock).toHaveBeenCalledWith(ctx.tripId);
+        expect(ctx.store.getState().saveError).toEqual(expect.stringMatching(/\S/));
+      },
+    );
+
+    it('clears saveError', async () => {
+      const { store, tripId, rows } = await setup();
+      updateItemMock.mockRejectedValue(new Error('offline'));
+      store.getState().togglePacked(tripId, rows()[0].id);
+      await flush();
+      expect(store.getState().saveError).toEqual(expect.any(String));
+
+      store.getState().clearSaveError();
+
+      expect(store.getState().saveError).toBeNull();
+    });
   });
 
-  it.each([
-    ['wrong shape', JSON.stringify({ state: { trips: [], items: 'nope' }, version: 1 })],
-    ['non-JSON text', 'not json {'],
-  ])('starts empty and stays usable with a corrupt blob: %s', (_label, saved) => {
-    const mem = memoryStorage();
-    mem.map.set('packsmart', saved);
+  describe('runAiSuggestions', () => {
+    it('inserts and appends only the new AI rows and reports ok', async () => {
+      const { store, tripId, rows } = await setup();
+      const before = rows();
+      const existing = before.find((row) => row.memberId === null) ?? before[0];
+      fetchMock.mockResolvedValue({
+        items: [
+          suggestion({ title: existing.title, category: existing.category }),
+          suggestion(),
+        ],
+        status: 'ok',
+      });
 
-    const store = createTripStore(() => mem.storage);
+      await store.getState().runAiSuggestions(tripId);
 
-    expect(store.getState().trips).toEqual({});
-    expect(store.getState().items).toEqual({});
-    const tripId = store.getState().createTrip(trip, weather);
-    expect(store.getState().trips[tripId]).toBeDefined();
-    expect(store.getState().items[tripId].length).toBeGreaterThan(0);
+      const added = rows().slice(before.length);
+      expect(rows().slice(0, before.length)).toEqual(before);
+      expect(added).toEqual([
+        expect.objectContaining({
+          id: expect.stringMatching(UUID),
+          tripId,
+          title: 'Phrasebook',
+          isPacked: false,
+          source: 'ai',
+        }),
+      ]);
+      expect(insertItemsMock).toHaveBeenCalledTimes(1);
+      expect(insertItemsMock).toHaveBeenCalledWith(added);
+      expect(store.getState().aiStatus[tripId]).toBe('ok');
+    });
+
+    it('adds the AI rows only after the insert resolves', async () => {
+      const { store, tripId, rows } = await setup();
+      const before = rows();
+      const insert = deferred();
+      insertItemsMock.mockReturnValue(insert.promise);
+      fetchMock.mockResolvedValue({ items: [suggestion()], status: 'ok' });
+
+      const pending = store.getState().runAiSuggestions(tripId);
+      await flush();
+
+      expect(insertItemsMock).toHaveBeenCalledTimes(1);
+      expect(rows()).toEqual(before);
+
+      insert.resolve();
+      await pending;
+
+      expect(rows()).toHaveLength(before.length + 1);
+    });
+
+    it('reports unavailable and changes no data when the AI insert fails', async () => {
+      const { store, tripId, rows } = await setup();
+      const before = rows();
+      const savedBefore = store.getState().trips[tripId];
+      insertItemsMock.mockRejectedValue(new Error('offline'));
+      fetchMock.mockResolvedValue({ items: [suggestion()], status: 'ok' });
+
+      await expect(store.getState().runAiSuggestions(tripId)).resolves.toBeUndefined();
+
+      expect(insertItemsMock).toHaveBeenCalledTimes(1);
+      expect(store.getState().aiStatus[tripId]).toBe('unavailable');
+      expect(rows()).toEqual(before);
+      expect(store.getState().trips[tripId]).toEqual(savedBefore);
+    });
+
+    it('keeps one copy of an AI row echoed before the insert resolves', async () => {
+      const { store, tripId, rows } = await setup();
+      const count = rows().length;
+      const insert = deferred();
+      insertItemsMock.mockReturnValue(insert.promise);
+      fetchMock.mockResolvedValue({ items: [suggestion()], status: 'ok' });
+
+      const pending = store.getState().runAiSuggestions(tripId);
+      await flush();
+      const [echo] = insertItemsMock.mock.calls[0][0];
+      store.getState().applyRemoteUpsert({ ...echo });
+      insert.resolve();
+      await pending;
+
+      expect(rows().filter((row) => row.id === echo.id)).toHaveLength(1);
+      expect(rows()).toHaveLength(count + 1);
+      expect(store.getState().aiStatus[tripId]).toBe('ok');
+    });
+
+    it('ignores a second AI request while one is loading', async () => {
+      const { store, tripId } = await setup();
+      const response = deferred<SuggestResponse>();
+      fetchMock.mockReturnValue(response.promise);
+
+      const first = store.getState().runAiSuggestions(tripId);
+      const second = store.getState().runAiSuggestions(tripId);
+      await second;
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(store.getState().aiStatus[tripId]).toBe('loading');
+
+      response.resolve({ items: [], status: 'ok' });
+      await first;
+
+      expect(store.getState().aiStatus[tripId]).toBe('ok');
+    });
+
+    it('reports unavailable and adds no rows when the service is unavailable', async () => {
+      const { store, tripId, rows } = await setup();
+      const before = rows();
+      fetchMock.mockResolvedValue({ items: [], status: 'unavailable' });
+
+      await store.getState().runAiSuggestions(tripId);
+
+      expect(store.getState().aiStatus[tripId]).toBe('unavailable');
+      expect(rows()).toEqual(before);
+    });
+
+    it('reports unavailable when the AI request rejects', async () => {
+      const { store, tripId, rows } = await setup();
+      const before = rows();
+      fetchMock.mockRejectedValue(new Error('boom'));
+
+      await expect(store.getState().runAiSuggestions(tripId)).resolves.toBeUndefined();
+
+      expect(store.getState().aiStatus[tripId]).toBe('unavailable');
+      expect(rows()).toEqual(before);
+    });
+
+    it('keeps a row added while loading and does not add the same title from the AI', async () => {
+      const { store, tripId, rows } = await setup();
+      const count = rows().length;
+      const response = deferred<SuggestResponse>();
+      fetchMock.mockReturnValue(response.promise);
+
+      const pending = store.getState().runAiSuggestions(tripId);
+      store.getState().addUserItem(tripId, 'Phrasebook', null);
+      response.resolve({
+        items: [suggestion({ title: 'phrasebook' }), suggestion({ title: 'Pocket map' })],
+        status: 'ok',
+      });
+      await pending;
+
+      expect(rows().slice(count).map((row) => [row.title, row.source])).toEqual([
+        ['Phrasebook', 'user'],
+        ['Pocket map', 'ai'],
+      ]);
+    });
   });
 
-  it.each<[string, (state: SavedState, tripId: string) => void]>([
-    ['a trip with no members', (state, id) => Object.assign(state.trips[id], { members: [] })],
-    [
-      'a trip that ends before it starts',
-      (state, id) => Object.assign(state.trips[id], { endDate: '2026-05-01' }),
-    ],
-    ['a trip type that no longer exists', (state, id) => Object.assign(state.trips[id], { tripType: 'camping' })],
-  ])('drops only the trip with %s, keeps the others and backs up the blob', (_label, corrupt) => {
-    const { mem, store, tripId } = setup();
-    const otherId = store.getState().createTrip(trip, weather);
-    const otherRows = store.getState().items[otherId];
-    store.getState().setCurrentMember(tripId, 'a1');
-    const blob = JSON.parse(mem.map.get('packsmart') ?? '') as { state: SavedState };
-    corrupt(blob.state, tripId);
-    const saved = JSON.stringify(blob);
-    mem.map.set('packsmart', saved);
+  describe('remote changes', () => {
+    it('replaces a row with the same id on a remote upsert', async () => {
+      const { store, rows } = await setup();
+      const before = rows();
+      const changed = { ...before[1], isPacked: true, quantity: 6 };
 
-    const reopened = createTripStore(() => mem.storage);
+      store.getState().applyRemoteUpsert(changed);
 
-    expect(Object.keys(reopened.getState().trips)).toEqual([otherId]);
-    expect(reopened.getState().items).toEqual({ [otherId]: otherRows });
-    expect(reopened.getState().currentMember).toEqual({});
-    expect(mem.map.get('packsmart-backup')).toBe(JSON.stringify(blob.state));
+      expect(rows()).toEqual([before[0], changed, ...before.slice(2)]);
+    });
+
+    it('appends an unknown row on a remote upsert', async () => {
+      const { store, tripId, rows } = await setup();
+      const before = rows();
+      const remote = item({ tripId });
+
+      store.getState().applyRemoteUpsert(remote);
+
+      expect(rows()).toEqual([...before, remote]);
+    });
+
+    it('ignores a remote upsert for a trip whose items are not loaded', async () => {
+      const { store } = await setup();
+      const before = store.getState().items;
+
+      store.getState().applyRemoteUpsert(item({ tripId: 'not-loaded' }));
+
+      expect(store.getState().items).toEqual(before);
+      expect(store.getState().items).not.toHaveProperty('not-loaded');
+    });
+
+    it('does not duplicate a quick-added row when its echo arrives', async () => {
+      const { store, tripId, rows } = await setup();
+      store.getState().addUserItem(tripId, 'Lucky charm', null);
+      const before = rows();
+
+      store.getState().applyRemoteUpsert({ ...before[before.length - 1] });
+
+      expect(rows()).toEqual(before);
+    });
+
+    it('removes a remotely deleted row from the trip that holds it', async () => {
+      const { store, tripId } = await setup();
+      const otherId = await store.getState().createTrip(familyTrip, weather);
+      const first = store.getState().items[tripId];
+      const other = store.getState().items[otherId];
+
+      store.getState().applyRemoteDelete(other[0].id);
+
+      expect(store.getState().items[otherId]).toEqual(other.slice(1));
+      expect(store.getState().items[tripId]).toEqual(first);
+    });
+
+    it('leaves the state untouched on a remote delete of an unknown id', async () => {
+      const { store } = await setup();
+      const before = store.getState();
+
+      store.getState().applyRemoteDelete('unknown-row');
+
+      expect(store.getState()).toBe(before);
+    });
   });
 
-  it('drops only an invalid row and keeps its trip', () => {
-    const { mem, tripId, rows } = setup();
-    const before = rows();
-    const blob = JSON.parse(mem.map.get('packsmart') ?? '') as { state: SavedState };
-    Object.assign(blob.state.items[tripId][0], { quantity: null });
-    mem.map.set('packsmart', JSON.stringify(blob));
+  describe('trip bookkeeping', () => {
+    it('sets and overwrites the current member for one trip only', async () => {
+      const { store, tripId } = await setup();
+      const otherId = await store.getState().createTrip(familyTrip, weather);
+      store.getState().setCurrentMember(otherId, 'a2');
 
-    const reopened = createTripStore(() => mem.storage);
+      store.getState().setCurrentMember(tripId, 'a1');
+      store.getState().setCurrentMember(tripId, 'c1');
 
-    expect(reopened.getState().trips[tripId]).toBeDefined();
-    expect(reopened.getState().items[tripId]).toEqual(before.slice(1));
-    expect(mem.map.has('packsmart-backup')).toBe(true);
+      expect(store.getState().currentMember).toEqual({ [tripId]: 'c1', [otherId]: 'a2' });
+    });
+
+    it('updates only the recent time on touch', async () => {
+      const { store, tripId } = await setup();
+      const { trips, items } = store.getState();
+      vi.setSystemTime(new Date(LATER));
+
+      store.getState().touchTrip(tripId);
+
+      expect(store.getState().recent).toEqual({ [tripId]: LATER });
+      expect(store.getState().trips).toEqual(trips);
+      expect(store.getState().items).toEqual(items);
+    });
+
+    it('ignores a touch for a trip that is not in the store', async () => {
+      const { store, tripId } = await setup();
+
+      store.getState().touchTrip('no-trip');
+
+      expect(store.getState().recent).toEqual({ [tripId]: NOW });
+    });
   });
 
-  it.each([
-    ['trips saved as an array', JSON.stringify({ state: { trips: [], items: {}, currentMember: {}, aiStatus: {} }, version: 1 }), JSON.stringify({ trips: [], items: {}, currentMember: {}, aiStatus: {} })],
-    ['non-JSON text', 'not json {', 'not json {'],
-  ])('backs up the saved data before discarding %s', (_label, saved, backup) => {
-    const mem = memoryStorage();
-    mem.map.set('packsmart', saved);
+  describe('persistence', () => {
+    const v2 = (state: object) => JSON.stringify({ state, version: 2 });
 
-    const store = createTripStore(() => mem.storage);
+    it('saves only currentMember, aiStatus and recent as version 2', async () => {
+      const { mem, store, tripId } = await setup();
+      fetchMock.mockResolvedValue({ items: [], status: 'ok' });
+      store.getState().setCurrentMember(tripId, 'a1');
 
-    expect(store.getState().trips).toEqual({});
-    expect(mem.map.get('packsmart-backup')).toBe(backup);
-  });
+      await store.getState().runAiSuggestions(tripId);
 
-  it('writes no backup when everything saved is valid', () => {
-    const { mem } = setup();
+      expect(savedBlob(mem)).toEqual({
+        state: {
+          currentMember: { [tripId]: 'a1' },
+          aiStatus: { [tripId]: 'ok' },
+          recent: { [tripId]: NOW },
+        },
+        version: 2,
+      });
+    });
 
-    createTripStore(() => mem.storage);
+    it('restores the saved preferences but no trip data in a new store', () => {
+      const saved = {
+        currentMember: { t1: 'a1' },
+        aiStatus: { t1: 'empty' },
+        recent: { t1: NOW },
+      };
 
-    expect(mem.map.has('packsmart-backup')).toBe(false);
-  });
+      const { store } = emptyStore(v2(saved));
 
-  it('forgets a saved current member who is not on the trip', () => {
-    const { mem, store, tripId } = setup();
-    store.getState().setCurrentMember(tripId, 'ghost');
+      expect(store.getState()).toMatchObject({ ...saved, saveError: null });
+      expect(store.getState().trips).toEqual({});
+      expect(store.getState().items).toEqual({});
+      expect(store.getState().load).toEqual({});
+    });
 
-    const reopened = createTripStore(() => mem.storage);
+    it('rehydrates a saved loading status as unavailable', () => {
+      const { store } = emptyStore(
+        v2({ currentMember: {}, aiStatus: { t1: 'loading' }, recent: {} }),
+      );
 
-    expect(reopened.getState().currentMember).toEqual({});
-  });
+      expect(store.getState().aiStatus).toEqual({ t1: 'unavailable' });
+    });
 
-  it('keeps saved trips when the saved version differs', () => {
-    const { mem, tripId } = setup();
-    const blob = JSON.parse(mem.map.get('packsmart') ?? '') as { version: number };
-    blob.version = 0;
-    mem.map.set('packsmart', JSON.stringify(blob));
+    it('drops invalid saved entries and keeps the valid ones', () => {
+      const { store } = emptyStore(
+        v2({
+          currentMember: { t1: 'a1' },
+          aiStatus: { t1: 'ok', t2: 'bogus' },
+          recent: { t1: NOW, t2: 'yesterday', t3: 5 },
+        }),
+      );
 
-    const reopened = createTripStore(() => mem.storage);
+      expect(store.getState().currentMember).toEqual({ t1: 'a1' });
+      expect(store.getState().aiStatus).toEqual({ t1: 'ok' });
+      expect(store.getState().recent).toEqual({ t1: NOW });
+    });
 
-    expect(reopened.getState().trips[tripId]).toBeDefined();
-  });
+    it('migrates a version 1 blob, keeping preferences and dropping trips and items', () => {
+      const v1Trip = (id: string, lastOpenedAt: string) => ({
+        ...savedTrip({ id }),
+        lastOpenedAt,
+      });
+      const { mem, store } = emptyStore(
+        JSON.stringify({
+          state: {
+            trips: { t1: v1Trip('t1', NOW), t2: v1Trip('t2', LATER) },
+            items: { t1: [item({ tripId: 't1' })], t2: [] },
+            currentMember: { t1: 'a1' },
+            aiStatus: { t1: 'ok' },
+          },
+          version: 1,
+        }),
+      );
+      const expected = {
+        currentMember: { t1: 'a1' },
+        aiStatus: { t1: 'ok' },
+        recent: { t1: NOW, t2: LATER },
+      };
 
-  it('keeps working in memory when storage refuses to save', () => {
-    const { mem, store, tripId, rows } = setup();
-    const { id } = rows()[0];
-    mem.storage.setItem = () => {
-      throw new Error('QuotaExceededError');
-    };
+      expect(store.getState()).toMatchObject(expected);
+      expect(store.getState().trips).toEqual({});
+      expect(store.getState().items).toEqual({});
+      expect(savedBlob(mem)).toEqual({ state: expected, version: 2 });
+    });
 
-    expect(() => store.getState().togglePacked(tripId, id)).not.toThrow();
-    expect(rows()[0].isPacked).toBe(true);
-  });
+    it.each([
+      [
+        'wrong-shape data',
+        v2({ currentMember: [], aiStatus: 'nope', recent: [] }),
+        JSON.stringify({ currentMember: [], aiStatus: 'nope', recent: [] }),
+      ],
+      ['non-JSON text', 'not json {', 'not json {'],
+    ])('backs up %s, starts empty and stays usable', async (_label, saved, backup) => {
+      const { mem, store } = emptyStore(saved);
 
-  it('restores the same trip and items in a new store on the same storage', () => {
-    const { mem, store, tripId, rows } = setup();
+      expect(store.getState().currentMember).toEqual({});
+      expect(store.getState().aiStatus).toEqual({});
+      expect(store.getState().recent).toEqual({});
+      expect(mem.map.get('packsmart-backup')).toBe(backup);
 
-    const reopened = createTripStore(() => mem.storage);
+      const id = await store.getState().createTrip(trip, weather);
 
-    expect(reopened.getState().trips[tripId]).toEqual(store.getState().trips[tripId]);
-    expect(reopened.getState().items[tripId]).toEqual(rows());
-  });
+      expect(store.getState().recent).toEqual({ [id]: NOW });
+    });
 
-  it('keeps the trip and its items after reload when a huge quantity was set', () => {
-    const { mem, store, tripId, rows } = setup();
-    const before = rows();
+    it('writes no backup when everything saved is valid', () => {
+      const { mem } = emptyStore(
+        v2({ currentMember: { t1: 'a1' }, aiStatus: { t1: 'ok' }, recent: { t1: NOW } }),
+      );
 
-    store.getState().setQuantity(tripId, before[0].id, 1e20);
-    const reopened = createTripStore(() => mem.storage);
+      expect(mem.map.has('packsmart-backup')).toBe(false);
+    });
 
-    expect(reopened.getState().trips[tripId]).toEqual(store.getState().trips[tripId]);
-    expect(reopened.getState().items[tripId]).toEqual([
-      { ...before[0], quantity: 99 },
-      ...before.slice(1),
-    ]);
+    it('keeps working in memory when storage refuses to save', async () => {
+      const { mem, store, tripId, rows } = await setup();
+      const { id } = rows()[0];
+      mem.storage.setItem = () => {
+        throw new Error('QuotaExceededError');
+      };
+
+      expect(() => store.getState().togglePacked(tripId, id)).not.toThrow();
+      expect(() => store.getState().setCurrentMember(tripId, 'a2')).not.toThrow();
+
+      expect(rows()[0].isPacked).toBe(true);
+      expect(store.getState().currentMember[tripId]).toBe('a2');
+    });
   });
 });

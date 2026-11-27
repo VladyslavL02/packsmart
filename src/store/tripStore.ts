@@ -5,12 +5,7 @@ import type { StateStorage } from 'zustand/middleware';
 import { generateBasePackingList, normalizeTitle } from '../engine/generator';
 import { newAiRows } from '../engine/listView';
 import { mergeItems } from '../engine/merge';
-import {
-  AI_STATUSES,
-  PackingItemSchema,
-  TripInputSchema,
-  WeatherSummarySchema,
-} from '../engine/types';
+import { AI_STATUSES, TripInputSchema } from '../engine/types';
 import type {
   Category,
   PackingItem,
@@ -19,34 +14,41 @@ import type {
   WeatherSummary,
 } from '../engine/types';
 import { fetchAiSuggestions } from '../services/suggestApi';
+import * as tripRepo from '../services/tripRepo';
+import type { SavedTrip } from '../services/tripRows';
 
-// `.and`, not `.extend`: TripInputSchema is refined, and Zod can't extend a refined object.
-export const StoredTripSchema = TripInputSchema.and(
-  z.object({
-    id: z.string().min(1),
-    weather: WeatherSummarySchema.nullable(),
-    createdAt: z.iso.datetime(),
-    lastOpenedAt: z.iso.datetime(),
-  }),
-);
-export type StoredTrip = z.infer<typeof StoredTripSchema>;
-
-/** A huge quantity fails the schema on reload, which would discard every trip. */
 export const MAX_QUANTITY = 99;
 
 export const AI_STORE_STATUSES = ['loading', ...AI_STATUSES] as const;
 export type AiStoreStatus = (typeof AI_STORE_STATUSES)[number];
 
-type TripData = {
-  trips: Record<string, StoredTrip>;
-  items: Record<string, PackingItem[]>;
+export type LoadStatus = 'loading' | 'ready' | 'missing' | 'error';
+
+const RELOADED_MESSAGE = "Couldn't save — refreshed the list";
+const OFFLINE_MESSAGE = "Couldn't save — check your connection";
+
+/** The only part kept in localStorage: trips and items live in Supabase. */
+type Preferences = {
   currentMember: Record<string, string>;
   aiStatus: Record<string, AiStoreStatus>;
+  /** Trip id to the time it was last opened on this browser. */
+  recent: Record<string, string>;
+};
+
+type TripData = Preferences & {
+  trips: Record<string, SavedTrip>;
+  items: Record<string, PackingItem[]>;
+  load: Record<string, LoadStatus>;
+  saveError: string | null;
 };
 
 type TripActions = {
-  /** Throws on input that fails TripInputSchema: once saved, it would discard every trip on reload. */
-  createTrip: (input: TripInput, weather: WeatherSummary | null) => string;
+  /** Rejects and keeps nothing if the input is invalid or the save fails. */
+  createTrip: (input: TripInput, weather: WeatherSummary | null) => Promise<string>;
+  loadTrip: (tripId: string) => Promise<void>;
+  applyRemoteUpsert: (item: PackingItem) => void;
+  applyRemoteDelete: (itemId: string) => void;
+  clearSaveError: () => void;
   togglePacked: (tripId: string, itemId: string) => void;
   setQuantity: (tripId: string, itemId: string, quantity: number) => void;
   deleteItem: (tripId: string, itemId: string) => void;
@@ -62,7 +64,15 @@ type TripActions = {
 
 export type TripState = TripData & TripActions;
 
-const emptyData = (): TripData => ({ trips: {}, items: {}, currentMember: {}, aiStatus: {} });
+const emptyPreferences = (): Preferences => ({ currentMember: {}, aiStatus: {}, recent: {} });
+
+const emptyData = (): TripData => ({
+  ...emptyPreferences(),
+  trips: {},
+  items: {},
+  load: {},
+  saveError: null,
+});
 
 const toRows = (tripId: string, drafts: PackingItemDraft[]): PackingItem[] =>
   drafts.map((draft) => ({ ...draft, id: crypto.randomUUID(), tripId, isPacked: false }));
@@ -71,61 +81,67 @@ const BACKUP_KEY = 'packsmart-backup';
 
 // Only the outer shape: a wrong shape here discards (and backs up) everything.
 const LooseSchema = z.object({
-  trips: z.record(z.string(), z.unknown()),
-  items: z.record(z.string(), z.unknown()),
   currentMember: z.record(z.string(), z.unknown()),
   aiStatus: z.record(z.string(), z.unknown()),
+  recent: z.record(z.string(), z.unknown()),
 });
 
+function validEntries<T>(record: Record<string, unknown>, schema: z.ZodType<T>) {
+  return Object.fromEntries(
+    Object.entries(record).flatMap(([key, value]) => {
+      const result = schema.safeParse(value);
+
+      return result.success ? [[key, result.data] as const] : [];
+    }),
+  );
+}
+
 /**
- * Check the saved blob before it becomes state, one trip and one row at a time: an invalid trip
- * or row is dropped on its own, so it can't take every other trip with it. Whatever was dropped
+ * Check the saved blob before it becomes state, one entry at a time. Anything discarded as a whole
  * stays readable in `packsmart-backup`, since the next save overwrites the main key.
  * A saved 'loading' means the page was closed mid-request, so it becomes 'unavailable' (Retry).
  */
-function sanitize(persisted: unknown, backup: (raw: unknown) => void): TripData {
+function sanitize(persisted: unknown, backup: (raw: unknown) => void): Preferences {
   // Nothing saved yet.
-  if (persisted === undefined || persisted === null) {return emptyData();}
+  if (persisted === undefined || persisted === null) {return emptyPreferences();}
   const loose = LooseSchema.safeParse(persisted);
   if (!loose.success) {
     console.warn('[store] discarded invalid saved data');
     backup(persisted);
 
-    return emptyData();
+    return emptyPreferences();
   }
-  const data = emptyData();
-  let dropped = 0;
-  for (const [tripId, raw] of Object.entries(loose.data.trips)) {
-    const trip = StoredTripSchema.safeParse(raw);
-    if (!trip.success || trip.data.id !== tripId) {
-      dropped += 1;
-      continue;
-    }
-    data.trips[tripId] = trip.data;
-    const rawItems = loose.data.items[tripId];
-    const rows = Array.isArray(rawItems) ? rawItems : [];
-    data.items[tripId] = rows.flatMap((row) => {
-      const item = PackingItemSchema.safeParse(row);
-      if (item.success && item.data.tripId === tripId) {return [item.data];}
-      dropped += 1;
-
-      return [];
-    });
-    const member = loose.data.currentMember[tripId];
-    if (typeof member === 'string' && trip.data.members.some((m) => m.id === member)) {
-      data.currentMember[tripId] = member;
-    }
-    const status = z.enum(AI_STORE_STATUSES).safeParse(loose.data.aiStatus[tripId]);
-    if (status.success) {
-      data.aiStatus[tripId] = status.data === 'loading' ? 'unavailable' : status.data;
-    }
-  }
-  if (dropped > 0) {
-    console.warn(`[store] dropped ${dropped} invalid saved trip(s) or row(s)`);
-    backup(persisted);
+  const aiStatus = validEntries(loose.data.aiStatus, z.enum(AI_STORE_STATUSES));
+  for (const [tripId, status] of Object.entries(aiStatus)) {
+    if (status === 'loading') {aiStatus[tripId] = 'unavailable';}
   }
 
-  return data;
+  return {
+    currentMember: validEntries(loose.data.currentMember, z.string()),
+    aiStatus,
+    recent: validEntries(loose.data.recent, z.iso.datetime()),
+  };
+}
+
+// Version 1 kept whole trips here. Only the preferences and the opened times carry over.
+const V1Schema = z.object({
+  trips: z.record(z.string(), z.unknown()),
+  currentMember: z.record(z.string(), z.unknown()),
+  aiStatus: z.record(z.string(), z.unknown()),
+});
+
+function migrateV1(persisted: unknown): unknown {
+  const v1 = V1Schema.safeParse(persisted);
+  if (!v1.success) {return persisted;}
+  const recent = Object.fromEntries(
+    Object.entries(v1.data.trips).flatMap(([tripId, trip]) => {
+      const parsed = z.object({ lastOpenedAt: z.iso.datetime() }).safeParse(trip);
+
+      return parsed.success ? [[tripId, parsed.data.lastOpenedAt] as const] : [];
+    }),
+  );
+
+  return { currentMember: v1.data.currentMember, aiStatus: v1.data.aiStatus, recent };
 }
 
 /**
@@ -168,6 +184,8 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
   return create<TripState>()(
     persist(
       (set, get) => {
+        let pending: Promise<string> | null = null;
+
         const updateItems = (tripId: string, update: (items: PackingItem[]) => PackingItem[]) => {
           set((state) => {
             const items = state.items[tripId];
@@ -184,42 +202,133 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
             items.map((item) => (item.id === itemId ? update(item) : item)),
           );
         };
+        const findItem = (tripId: string, itemId: string) =>
+          get().items[tripId]?.find((item) => item.id === itemId);
         const setAiStatus = (tripId: string, status: AiStoreStatus) => {
           set((state) => ({ aiStatus: { ...state.aiStatus, [tripId]: status } }));
+        };
+        const setLoad = (tripId: string, status: LoadStatus) => {
+          set((state) => ({ load: { ...state.load, [tripId]: status } }));
+        };
+
+        // After a failed write the screen is ahead of the database, so take the server's rows.
+        const reload = async (tripId: string) => {
+          try {
+            const data = await tripRepo.fetchTrip(tripId);
+            if (data) {
+              updateItems(tripId, () => data.items);
+              set({ saveError: RELOADED_MESSAGE });
+
+              return;
+            }
+          } catch (error) {
+            console.warn('[store] could not reload the list:', error);
+          }
+          set({ saveError: OFFLINE_MESSAGE });
+        };
+        // The change is already on screen; this only persists it.
+        const save = (tripId: string, write: Promise<void>) => {
+          void write.catch((error: unknown) => {
+            console.warn('[store] could not save the change:', error);
+
+            return reload(tripId);
+          });
+        };
+
+        // The only place the rules run: existing rows are never regenerated.
+        const insertTrip = async (rawInput: TripInput, weather: WeatherSummary | null) => {
+          const input = TripInputSchema.parse(rawInput);
+          const id = crypto.randomUUID();
+          const rows = toRows(id, generateBasePackingList(input, weather));
+          const trip = await tripRepo.insertTripWithItems(
+            { ...input, id, weather, createdAt: new Date().toISOString() },
+            rows,
+          );
+          set((state) => ({
+            trips: { ...state.trips, [id]: trip },
+            items: { ...state.items, [id]: rows },
+            load: { ...state.load, [id]: 'ready' },
+            recent: { ...state.recent, [id]: new Date().toISOString() },
+          }));
+
+          return id;
         };
 
         return {
           ...emptyData(),
 
-          // The only place the rules run: existing rows are never regenerated.
-          createTrip: (rawInput, weather) => {
-            const input = TripInputSchema.parse(rawInput);
-            const id = crypto.randomUUID();
-            const now = new Date().toISOString();
-            const trip: StoredTrip = { ...input, id, weather, createdAt: now, lastOpenedAt: now };
-            const rows = toRows(id, generateBasePackingList(input, weather));
-            set((state) => ({
-              trips: { ...state.trips, [id]: trip },
-              items: { ...state.items, [id]: rows },
-            }));
+          // A double submit gets the running insert instead of starting a second one.
+          createTrip: (input, weather) => {
+            pending ??= insertTrip(input, weather).finally(() => {
+              pending = null;
+            });
 
-            return id;
+            return pending;
+          },
+
+          loadTrip: async (tripId) => {
+            setLoad(tripId, 'loading');
+            try {
+              const data = await tripRepo.fetchTrip(tripId);
+              if (!data) {
+                setLoad(tripId, 'missing');
+
+                return;
+              }
+              set((state) => ({
+                trips: { ...state.trips, [tripId]: data.trip },
+                items: { ...state.items, [tripId]: data.items },
+                load: { ...state.load, [tripId]: 'ready' },
+              }));
+            } catch (error) {
+              console.warn('[store] could not load the trip:', error);
+              setLoad(tripId, 'error');
+            }
+          },
+
+          // Matched by id, so the echo of this tab's own insert doesn't duplicate the row.
+          applyRemoteUpsert: (item) => {
+            updateItems(item.tripId, (items) =>
+              items.some((row) => row.id === item.id)
+                ? items.map((row) => (row.id === item.id ? item : row))
+                : [...items, item],
+            );
+          },
+
+          // Every delete arrives, whatever the trip, so an unknown id must change nothing.
+          applyRemoteDelete: (itemId) => {
+            const tripId = Object.keys(get().items).find((id) => findItem(id, itemId));
+            if (tripId) {
+              updateItems(tripId, (items) => items.filter((item) => item.id !== itemId));
+            }
+          },
+
+          clearSaveError: () => {
+            set({ saveError: null });
           },
 
           togglePacked: (tripId, itemId) => {
-            updateItem(tripId, itemId, (item) => ({ ...item, isPacked: !item.isPacked }));
+            const item = findItem(tripId, itemId);
+            if (!item) {return;}
+            const isPacked = !item.isPacked;
+            updateItem(tripId, itemId, (row) => ({ ...row, isPacked }));
+            save(tripId, tripRepo.updateItem(itemId, { isPacked }));
           },
 
           setQuantity: (tripId, itemId, quantity) => {
-            // NaN and Infinity save as null, which would discard every trip on reload.
+            // NaN and Infinity would be written as null.
             const clamped = Number.isFinite(quantity)
               ? Math.min(MAX_QUANTITY, Math.max(1, Math.round(quantity)))
               : 1;
-            updateItem(tripId, itemId, (item) => ({ ...item, quantity: clamped }));
+            if (!findItem(tripId, itemId)) {return;}
+            updateItem(tripId, itemId, (row) => ({ ...row, quantity: clamped }));
+            save(tripId, tripRepo.updateItem(itemId, { quantity: clamped }));
           },
 
           deleteItem: (tripId, itemId) => {
+            if (!findItem(tripId, itemId)) {return;}
             updateItems(tripId, (items) => items.filter((item) => item.id !== itemId));
+            save(tripId, tripRepo.deleteItem(itemId));
           },
 
           addUserItem: (tripId, title, memberId) => {
@@ -246,19 +355,25 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
               },
             ]);
             updateItems(tripId, (items) => [...items, ...rows]);
+            save(tripId, tripRepo.insertItems(rows));
 
             return true;
           },
 
           markCategoryPacked: (tripId, category, itemIds) => {
             const only = itemIds && new Set(itemIds);
+            const ids = (get().items[tripId] ?? [])
+              .filter(
+                (item) =>
+                  item.category === category && !item.isPacked && (!only || only.has(item.id)),
+              )
+              .map((item) => item.id);
+            if (ids.length === 0) {return;}
+            const marked = new Set(ids);
             updateItems(tripId, (items) =>
-              items.map((item) =>
-                item.category === category && (!only || only.has(item.id))
-                  ? { ...item, isPacked: true }
-                  : item,
-              ),
+              items.map((item) => (marked.has(item.id) ? { ...item, isPacked: true } : item)),
             );
+            save(tripId, tripRepo.updateItems(ids, { isPacked: true }));
           },
 
           setCurrentMember: (tripId, memberId) => {
@@ -266,13 +381,8 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
           },
 
           touchTrip: (tripId) => {
-            set((state) => {
-              const trip = state.trips[tripId];
-              if (!trip) {return state;}
-              const touched = { ...trip, lastOpenedAt: new Date().toISOString() };
-
-              return { trips: { ...state.trips, [tripId]: touched } };
-            });
+            if (!get().trips[tripId]) {return;}
+            set((state) => ({ recent: { ...state.recent, [tripId]: new Date().toISOString() } }));
           },
 
           // Lives in the store, not a component, so navigating away doesn't cancel it.
@@ -287,7 +397,14 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
               if (!latest) {return;}
               const merged = mergeItems(latest, res.items, trip.members);
               const rows = toRows(tripId, newAiRows(latest, merged));
-              updateItems(tripId, (items) => [...items, ...rows]);
+              // Saved first: a failed insert leaves the list as it was.
+              await tripRepo.insertItems(rows);
+              // The Realtime echo may have added some of these while the insert was running.
+              updateItems(tripId, (items) => {
+                const known = new Set(items.map((item) => item.id));
+
+                return [...items, ...rows.filter((row) => !known.has(row.id))];
+              });
               setAiStatus(tripId, res.status);
             } catch (error) {
               // Never leave the status stuck on 'loading'.
@@ -299,17 +416,12 @@ export function createTripStore(getStorage: () => StateStorage = () => localStor
       },
       {
         name: 'packsmart',
-        version: 1,
+        version: 2,
         storage: createJSONStorage(() => safeStorage(getStorage())),
-        partialize: ({ trips, items, currentMember, aiStatus }) => ({
-          trips,
-          items,
-          currentMember,
-          aiStatus,
-        }),
-        // Without a migrate, a future version bump would load nothing at all; sanitize keeps what
-        // still fits the current schemas.
-        migrate: (persisted) => persisted as TripData,
+        partialize: ({ currentMember, aiStatus, recent }) => ({ currentMember, aiStatus, recent }),
+        // Without a migrate, a version change would load nothing at all.
+        migrate: (persisted, version) =>
+          (version === 1 ? migrateV1(persisted) : persisted) as Preferences,
         // merge runs during hydration, before any component reads the state.
         merge: (persisted, current) => ({
           ...current,

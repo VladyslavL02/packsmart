@@ -10,12 +10,13 @@ const MAX_SHOWN = 5;
 export function RecentTrips() {
   const trips = useTripStore((state) => state.trips);
   const items = useTripStore((state) => state.items);
+  const openedAt = useTripStore((state) => state.recent);
   const recent = useMemo(
     () =>
       Object.values(trips)
-        .sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt))
+        .sort((a, b) => (openedAt[b.id] ?? '').localeCompare(openedAt[a.id] ?? ''))
         .slice(0, MAX_SHOWN),
-    [trips],
+    [trips, openedAt],
   );
   if (recent.length === 0) {return null;}
 
