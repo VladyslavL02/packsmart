@@ -377,4 +377,17 @@ describe('subscribeToTrip', () => {
 
     expect(supabase.removeChannel).toHaveBeenCalledWith(channel);
   });
+
+  it('uses a new channel name for each subscription to the same trip', () => {
+    // StrictMode: subscribe, unsubscribe, subscribe again.
+    subscribe().unsubscribe();
+    subscribe();
+
+    const names = vi.mocked(supabase.channel).mock.calls.map(([name]) => name);
+    expect(names).toHaveLength(2);
+    for (const name of names) {
+      expect(name.startsWith(`trip:${TRIP_ID}:`)).toBe(true);
+    }
+    expect(names[0]).not.toBe(names[1]);
+  });
 });
