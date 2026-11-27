@@ -860,23 +860,27 @@ describe('second reviewer pass', () => {
     expect(quantityOf(rule, directCtx(10, 'standard'))).toBe(3);
   });
 
-  // One bottle per 10 person-days, between 1 and 4.
+  // One bottle per 10 person-days in heat or on a beach, per 20 otherwise, between 1 and 4.
   it.each([
-    [1, 1, 0, 1],
-    [7, 1, 0, 1],
-    [10, 1, 0, 1],
-    [11, 1, 0, 2],
-    [14, 1, 0, 2],
-    [21, 1, 0, 3],
-    [7, 3, 0, 3],
-    [7, 1, 2, 3],
-    [14, 4, 0, 4],
-    [30, 2, 2, 4],
+    ['heat', 1, 1, 0, 1],
+    ['heat', 10, 1, 0, 1],
+    ['heat', 11, 1, 0, 2],
+    ['heat', 7, 1, 2, 3],
+    ['heat', 14, 4, 0, 4],
+    ['beach', 7, 3, 0, 3],
+    ['mild', 7, 1, 2, 2],
+    ['mild', 20, 1, 0, 1],
+    ['mild', 21, 1, 0, 2],
+    ['mild', 30, 4, 0, 4],
   ])(
-    'sunscreen for %s days, %s adult(s) and %s child(ren) is %s bottle(s)',
-    (days, adults, children, expected) => {
+    'sunscreen on a %s trip of %s days, %s adult(s) and %s child(ren) is %s bottle(s)',
+    (kind, days, adults, children, expected) => {
       const ctx = directCtx(days, 'standard', {
-        input: trip({ members: members(adults, children) }),
+        input: trip({
+          tripType: kind === 'beach' ? 'beach' : 'mountains',
+          members: members(adults, children),
+        }),
+        flags: { ...noFlags, heat: kind === 'heat' },
       });
       expect(quantityOf(findRule(WEATHER_RULES, 'sunscreen'), ctx)).toBe(expected);
     },

@@ -372,9 +372,14 @@ export const WEATHER_RULES: Rule[] = [
     title: 'Sunscreen',
     category: 'toiletries',
     appliesTo: 'shared',
-    // One bottle lasts about 10 person-days; more than four is better bought there.
-    quantity: (ctx) =>
-      Math.min(Math.max(1, Math.ceil((ctx.days * ctx.input.members.length) / 10)), 4),
+    // One bottle lasts about 10 person-days of heavy use (heat or beach) and twice that otherwise.
+    // More than four is better bought there.
+    quantity: (ctx) => {
+      const personDaysPerBottle = ctx.flags.heat || ctx.input.tripType === 'beach' ? 10 : 20;
+      const bottles = Math.ceil((ctx.days * ctx.input.members.length) / personDaysPerBottle);
+
+      return Math.min(Math.max(1, bottles), 4);
+    },
     when: needsSunProtection,
     reason: sunReason,
   },
