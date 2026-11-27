@@ -27,7 +27,13 @@ function toItems(rows: unknown[]): PackingItem[] {
 export async function insertItems(items: PackingItem[]): Promise<void> {
   if (items.length === 0) {return;}
 
-  const { error } = await supabase.from('packing_items').insert(items.map(itemToRow));
+  // One bulk insert would give every row the same default created_at, leaving their order open.
+  const now = Date.now();
+  const rows = items.map((item, index) => ({
+    ...itemToRow(item),
+    created_at: new Date(now + index).toISOString(),
+  }));
+  const { error } = await supabase.from('packing_items').insert(rows);
   if (error) {fail('insert items', error);}
 }
 
@@ -62,7 +68,8 @@ export async function fetchTrip(id: string): Promise<TripWithItems | null> {
 
   const [tripResult, itemsResult] = await Promise.all([
     supabase.from('trips').select().eq('id', id).maybeSingle(),
-    supabase.from('packing_items').select().eq('trip_id', id).order('created_at'),
+    // id settles the order of rows saved with the same created_at.
+    supabase.from('packing_items').select().eq('trip_id', id).order('created_at').order('id'),
   ]);
   if (tripResult.error) {fail('fetch trip', tripResult.error);}
   if (itemsResult.error) {fail('fetch items', itemsResult.error);}

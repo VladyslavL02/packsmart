@@ -131,7 +131,9 @@ describe('insertTripWithItems', () => {
     expect(queries[0].select).toHaveBeenCalled();
     expect(queries[0].single).toHaveBeenCalled();
     expect(queries[1].insert).toHaveBeenCalledTimes(1);
-    expect(queries[1].insert).toHaveBeenCalledWith(items.map(itemToRow));
+    expect(queries[1].insert).toHaveBeenCalledWith(
+      items.map((row) => ({ ...itemToRow(row), created_at: expect.any(String) })),
+    );
   });
 
   it('deletes the trip and rethrows the items error when the items insert fails', async () => {
@@ -168,6 +170,27 @@ describe('insertTripWithItems', () => {
     await insertTripWithItems(trip(), []);
 
     expect(tables()).toEqual(['trips']);
+  });
+});
+
+describe('row order', () => {
+  it('inserts rows with increasing created_at, so a reload keeps the list order', async () => {
+    const rows = [item(), item({ id: OTHER_ITEM_ID, key: 'socks', title: 'Socks' })];
+
+    await insertItems(rows);
+
+    const sent = queries[0].insert.mock.calls[0][0] as { id: string; created_at: string }[];
+    expect(sent.map((row) => row.id)).toEqual([ITEM_ID, OTHER_ITEM_ID]);
+    expect(Date.parse(sent[1].created_at)).toBeGreaterThan(Date.parse(sent[0].created_at));
+  });
+
+  it('sorts fetched items by created_at, then id for rows that share it', async () => {
+    queue('trips', ok(tripRow()));
+    queue('packing_items', ok([itemRow()]));
+
+    await fetchTrip(TRIP_ID);
+
+    expect(queries[1].order.mock.calls).toEqual([['created_at'], ['id']]);
   });
 });
 
@@ -246,7 +269,9 @@ describe('item writes', () => {
     await insertItems([item()]);
 
     expect(tables()).toEqual(['packing_items']);
-    expect(queries[0].insert).toHaveBeenCalledWith([itemToRow(item())]);
+    expect(queries[0].insert).toHaveBeenCalledWith([
+      { ...itemToRow(item()), created_at: expect.any(String) },
+    ]);
   });
 
   it.each([
