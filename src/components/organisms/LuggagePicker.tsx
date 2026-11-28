@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import {
   LUGGAGE_LABELS,
-  MAX_LUGGAGE_COUNT,
   setLuggageCount,
   toggleLuggage,
 } from '../../engine/tripForm';
-import { LUGGAGE } from '../../engine/types';
+import { LUGGAGE, MAX_LUGGAGE_COUNT } from '../../engine/types';
 import type { LuggageEntry, LuggageType } from '../../engine/types';
 import { LUGGAGE_ICONS } from '../../lib/tripMeta';
 import { OptionCard } from '../molecules/OptionCard';

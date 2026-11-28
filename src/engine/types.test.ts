@@ -203,9 +203,21 @@ describe('TripInputSchema', () => {
     expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false);
   });
 
-  it('accepts a large luggage count with no upper cap', () => {
-    const luggage = [{ type: 'checked', count: 10 }];
+  it('accepts the largest luggage count the form allows', () => {
+    const luggage = [{ type: 'checked', count: 9 }];
     expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(true);
+  });
+
+  it('rejects a luggage count above the form maximum', () => {
+    const luggage = [{ type: 'checked', count: 10 }];
+    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(false);
+  });
+
+  it('accepts a member id of 64 characters and rejects 65', () => {
+    const withId = (length: number) =>
+      validTrip({ members: [{ id: 'a'.repeat(length), name: 'Ann', kind: 'adult' }] });
+    expect(TripInputSchema.safeParse(withId(64)).success).toBe(true);
+    expect(TripInputSchema.safeParse(withId(65)).success).toBe(false);
   });
 
   it.each(LUGGAGE)('accepts %s as a single luggage entry', (type) => {

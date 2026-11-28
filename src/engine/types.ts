@@ -20,13 +20,16 @@ const MAX_CITY_LENGTH = 100;
 const MAX_COUNTRY_LENGTH = 100;
 export const MAX_MEMBERS = 20;
 export const MAX_MEMBER_NAME_LENGTH = 40;
+// The app uses uuids (36 characters).
+const MAX_MEMBER_ID_LENGTH = 64;
+export const MAX_LUGGAGE_COUNT = 9;
 
 export const TripTypeSchema = z.enum(TRIP_TYPES);
 const LuggageTypeSchema = z.enum(LUGGAGE);
 export const CategorySchema = z.enum(CATEGORIES);
 
 export const MemberSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().min(1).max(MAX_MEMBER_ID_LENGTH),
   name: z.string().min(1).max(MAX_MEMBER_NAME_LENGTH),
   kind: z.enum(['adult', 'child']),
 });
@@ -34,7 +37,7 @@ export const MemberSchema = z.object({
 // A family can bring several bags of the same type, so luggage is a count per type.
 export const LuggageEntrySchema = z.object({
   type: LuggageTypeSchema,
-  count: z.number().int().min(1),
+  count: z.number().int().min(1).max(MAX_LUGGAGE_COUNT),
 });
 
 export const TripInputSchema = z

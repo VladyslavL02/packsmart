@@ -1,10 +1,9 @@
 import { tripDays } from './dates';
-import { TripInputSchema } from './types';
+import { MAX_LUGGAGE_COUNT, TripInputSchema } from './types';
 import type { LuggageEntry, LuggageType, Member, TripInput, TripType } from './types';
 
 export const MAX_NAME_LENGTH = 30;
 export const MAX_PER_KIND = 10;
-export const MAX_LUGGAGE_COUNT = 9;
 
 // Same fields as City in services/weatherApi.ts: the engine can't import from services.
 export type TripCity = {
