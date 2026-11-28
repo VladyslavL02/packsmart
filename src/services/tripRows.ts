@@ -12,7 +12,7 @@ import type { PackingItem } from '../engine/types';
 import type { TablesInsert } from '../lib/database.types';
 
 // `.and`, not `.extend`: TripInputSchema is refined, and Zod can't extend a refined object.
-export const SavedTripSchema = TripInputSchema.and(
+const SavedTripSchema = TripInputSchema.and(
   z.object({
     id: z.string().min(1),
     weather: WeatherSummarySchema.nullable(),
@@ -22,7 +22,7 @@ export const SavedTripSchema = TripInputSchema.and(
 export type SavedTrip = z.infer<typeof SavedTripSchema>;
 
 // Plain z.object strips unknown keys, so a new column doesn't break old clients.
-export const TripRowSchema = z.object({
+const TripRowSchema = z.object({
   id: z.string().min(1),
   city: z.string(),
   country: z.string().nullable(),
@@ -39,7 +39,7 @@ export const TripRowSchema = z.object({
   created_at: z.iso.datetime({ offset: true }),
 });
 
-export const ItemRowSchema = z.object({
+const ItemRowSchema = z.object({
   id: z.string().min(1),
   trip_id: z.string().min(1),
   key: z.string().nullable(),

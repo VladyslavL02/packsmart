@@ -3,6 +3,7 @@ import {
   AI_SCOPES,
   AiSuggestionSchema,
   CATEGORIES,
+  type AiStatus,
   type AiSuggestion,
   type SuggestRequest,
   type SuggestResponse,
@@ -10,7 +11,7 @@ import {
 
 export const GEMINI_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent';
-export const GEMINI_TIMEOUT_MS = 8000;
+const GEMINI_TIMEOUT_MS = 8000;
 export const MAX_AI_ITEMS = 15;
 // 15 items with long reasons run past 1000 tokens; a cut-off answer is invalid JSON and loses all.
 export const MAX_OUTPUT_TOKENS = 2500;
@@ -19,7 +20,7 @@ export const RETRY_STATUSES: readonly number[] = [429, 503];
 export const RETRY_DELAY_MS = 500;
 
 // Gemini's OpenAPI subset, built from the contract constants so it can't drift.
-export const RESPONSE_SCHEMA = {
+const RESPONSE_SCHEMA = {
   type: 'ARRAY',
   items: {
     type: 'OBJECT',
@@ -181,7 +182,7 @@ type LogReason =
 
 // Every exit of getAiSuggestions returns through here, so each call logs exactly one line.
 function logOutcome(
-  status: SuggestResponse['status'],
+  status: AiStatus,
   startedAt: number,
   items: AiSuggestion[],
   detail?: { reason: LogReason; err?: string },
@@ -234,11 +235,7 @@ export async function getAiSuggestions(
       response = await send();
     }
     if (!response.ok) {return fail(`http_${response.status}`);}
-    // A body that is not JSON is a SyntaxError; a timeout or abort while reading it is not.
-    const json: unknown = await response.json().catch((error: unknown) => {
-      if (error instanceof SyntaxError) {return null;}
-      throw error;
-    });
+    const json: unknown = await response.json();
     const finish = FinishSchema.safeParse(json);
     const truncated = finish.success && finish.data.candidates[0].finishReason === 'MAX_TOKENS';
     const items = parseGeminiResponse(json);
@@ -254,6 +251,8 @@ export async function getAiSuggestions(
     if (signal?.aborted) {return fail('aborted');}
     const name = error instanceof Error ? error.name : 'unknown';
     if (name === 'TimeoutError') {return fail('timeout');}
+    // response.json() on a body that is not JSON.
+    if (name === 'SyntaxError') {return fail('unparseable');}
 
     // Name only: a fetch error message can quote the x-goog-api-key header value.
     return fail('network', name);

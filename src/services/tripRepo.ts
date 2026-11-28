@@ -5,8 +5,8 @@ import { deletedItemId, itemToRow, rowToItem, rowToTrip, tripToRow } from './tri
 import type { SavedTrip } from './tripRows';
 
 export type TripWithItems = { trip: SavedTrip; items: PackingItem[] };
-export type ItemPatch = Partial<Pick<PackingItem, 'isPacked' | 'quantity'>>;
-export type TripHandlers = {
+type ItemPatch = Partial<Pick<PackingItem, 'isPacked' | 'quantity'>>;
+type TripHandlers = {
   onUpsert: (item: PackingItem) => void;
   onDelete: (id: string) => void;
   /** Database changes started flowing, on join or rejoin: changes made before this weren't delivered. */

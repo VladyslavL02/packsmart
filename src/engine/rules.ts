@@ -3,7 +3,7 @@ import type { Category, LuggageType, TripInput, TripType, WeatherSummary } from 
 
 export type WeatherFlags = { rain: boolean; cold: boolean; freezing: boolean; heat: boolean };
 export type PackingCapacity = 'light' | 'standard' | 'roomy' | 'spacious';
-export type RuleScope = 'shared' | 'everyone' | 'adult' | 'child';
+type RuleScope = 'shared' | 'everyone' | 'adult' | 'child';
 
 export type RuleContext = {
   input: TripInput;
@@ -26,11 +26,11 @@ export type Rule = {
 
 // --- Weather thresholds -------------------------------------------------
 
-export const RAIN_PROB_THRESHOLD = 50;
-export const LIGHT_LAYER_MAX = 15;
-export const COLD_MAX = 8;
-export const FREEZING_MAX = 0;
-export const HEAT_MIN = 27;
+const RAIN_PROB_THRESHOLD = 50;
+const LIGHT_LAYER_MAX = 15;
+const COLD_MAX = 8;
+const FREEZING_MAX = 0;
+const HEAT_MIN = 27;
 
 export function deriveWeatherFlags(weather: WeatherSummary | null): WeatherFlags {
   if (!weather) {return { rain: false, cold: false, freezing: false, heat: false };}
@@ -62,7 +62,7 @@ export const BAG_LITERS: Record<LuggageType, number> = {
 const CHILD_SPACE_WEIGHT = 0.5;
 
 /** Liters per traveler unit at which each tier starts. Below the first value is 'light'. */
-export const CAPACITY_MIN_LITERS: Record<Exclude<PackingCapacity, 'light'>, number> = {
+const CAPACITY_MIN_LITERS: Record<Exclude<PackingCapacity, 'light'>, number> = {
   standard: 30,
   roomy: 70,
   spacious: 120,

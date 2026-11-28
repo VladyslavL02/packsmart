@@ -16,13 +16,13 @@ export const CATEGORIES = [
 export const AI_SCOPES = ['shared', 'everyone', 'adult', 'child'] as const;
 
 // Upper bounds keep a public /api/suggest request from flooding the Gemini prompt.
-export const MAX_CITY_LENGTH = 100;
-export const MAX_COUNTRY_LENGTH = 100;
+const MAX_CITY_LENGTH = 100;
+const MAX_COUNTRY_LENGTH = 100;
 export const MAX_MEMBERS = 20;
 export const MAX_MEMBER_NAME_LENGTH = 40;
 
 export const TripTypeSchema = z.enum(TRIP_TYPES);
-export const LuggageTypeSchema = z.enum(LUGGAGE);
+const LuggageTypeSchema = z.enum(LUGGAGE);
 export const CategorySchema = z.enum(CATEGORIES);
 
 export const MemberSchema = z.object({
@@ -72,7 +72,7 @@ export const WeatherSummarySchema = z.object({
   source: z.enum(['forecast', 'seasonal']),
 });
 
-export const AiScopeSchema = z.enum(AI_SCOPES);
+const AiScopeSchema = z.enum(AI_SCOPES);
 
 // What /api/suggest returns, before mergeItems expands it per member.
 export const AiSuggestionSchema = z.object({
@@ -93,7 +93,7 @@ export const ExistingItemSchema = z.object({
 // What /api/suggest reports: 'empty' = Gemini answered with nothing usable,
 // 'unavailable' = it could not be reached (no key, HTTP error, timeout…), so the UI can offer a retry.
 export const AI_STATUSES = ['ok', 'empty', 'unavailable'] as const;
-export const AiStatusSchema = z.enum(AI_STATUSES);
+const AiStatusSchema = z.enum(AI_STATUSES);
 
 export const SuggestRequestSchema = z.object({
   trip: TripInputSchema,

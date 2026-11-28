@@ -19,10 +19,10 @@ import type { SavedTrip } from '../services/tripRows';
 
 export const MAX_QUANTITY = 99;
 
-export const AI_STORE_STATUSES = ['loading', ...AI_STATUSES] as const;
-export type AiStoreStatus = (typeof AI_STORE_STATUSES)[number];
+const AI_STORE_STATUSES = ['loading', ...AI_STATUSES] as const;
+type AiStoreStatus = (typeof AI_STORE_STATUSES)[number];
 
-export type LoadStatus = 'loading' | 'ready' | 'missing' | 'error';
+type LoadStatus = 'loading' | 'ready' | 'missing' | 'error';
 
 const RELOADED_MESSAGE = "Couldn't save — refreshed the list";
 const OFFLINE_MESSAGE = "Couldn't save — check your connection";
@@ -78,7 +78,7 @@ type TripActions = {
   runAiSuggestions: (tripId: string) => Promise<void>;
 };
 
-export type TripState = TripData & TripActions;
+type TripState = TripData & TripActions;
 
 const emptyPreferences = (): Preferences => ({ currentMember: {}, aiStatus: {}, recent: {} });
 
