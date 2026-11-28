@@ -222,11 +222,13 @@ describe('getAiSuggestions', () => {
   let info: ReturnType<typeof vi.spyOn>;
   let warn: ReturnType<typeof vi.spyOn>;
   let log: ReturnType<typeof vi.spyOn>;
+  let error: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -234,7 +236,9 @@ describe('getAiSuggestions', () => {
     vi.restoreAllMocks();
   });
 
-  const logLines = (): unknown[][] => [...info.mock.calls, ...warn.mock.calls];
+  // Every channel, so a stray console.log or console.error can't slip past the checks below.
+  const logLines = (): unknown[][] =>
+    [info, warn, log, error].flatMap((spy) => spy.mock.calls);
   const loggedText = () => JSON.stringify(logLines());
 
   // Exactly one line for the call, on the given channel, as a single string argument.
@@ -349,6 +353,7 @@ describe('getAiSuggestions', () => {
     ['a blocked prompt', { promptFeedback: { blockReason: 'SAFETY' } }],
     ['no candidates', { candidates: [] }],
     ['a candidate blocked without content', { candidates: [{ finishReason: 'SAFETY' }] }],
+    ['only thought parts', { candidates: [{ content: { parts: [{ text: '[]', thought: true }] } }] }],
     ['non-JSON text', envelope('not json {')],
     ['a non-array answer', envelope('{}')],
   ])('is unavailable for %s', async (_label, body) => {
@@ -367,13 +372,14 @@ describe('getAiSuggestions', () => {
     expect(loggedText()).not.toContain('Umb');
   });
 
-  it('never calls console.log', async () => {
+  it('never calls console.log or console.error', async () => {
     const { content } = envelopeOf([item('Umbrella')]).candidates[0];
     const body = { candidates: [{ content, finishReason: 'STOP' }] };
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(body)));
 
     expect((await getAiSuggestions(req, KEY)).status).toBe('ok');
     expect(log).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   it('adds reason=truncated to an ok line when the finish reason is MAX_TOKENS', async () => {
@@ -405,6 +411,7 @@ describe('getAiSuggestions', () => {
       jsonResponse(envelopeOf([item('Bad', { category: 'nope' }), { nonsense: true }])),
     ));
     expect(await getAiSuggestions(req, KEY)).toEqual({ items: [], status: 'empty' });
+    expect(onlyLine()).toMatch(emptyLine());
   });
 
   it('is unavailable when the response body is not JSON', async () => {
@@ -523,6 +530,20 @@ describe('getAiSuggestions', () => {
       await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS);
 
       expect(await pending).toEqual(UNAVAILABLE);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(onlyLine()).toMatch(unavailableLine('aborted'));
+    });
+
+    it('does not wait or retry when the caller has aborted by the time the 503 arrives', async () => {
+      const caller = new AbortController();
+      const fetchMock = vi.fn(async () => {
+        caller.abort();
+
+        return status(503);
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      expect(await getAiSuggestions(req, KEY, caller.signal)).toEqual(UNAVAILABLE);
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(onlyLine()).toMatch(unavailableLine('aborted'));
     });
