@@ -15,13 +15,19 @@ export const CATEGORIES = [
 // 'everyone' is expanded per member by mergeItems; the DB scope stays shared | adult | child.
 export const AI_SCOPES = ['shared', 'everyone', 'adult', 'child'] as const;
 
+// Upper bounds keep a public /api/suggest request from flooding the Gemini prompt.
+export const MAX_CITY_LENGTH = 100;
+export const MAX_COUNTRY_LENGTH = 100;
+export const MAX_MEMBERS = 20;
+export const MAX_MEMBER_NAME_LENGTH = 40;
+
 export const TripTypeSchema = z.enum(TRIP_TYPES);
 export const LuggageTypeSchema = z.enum(LUGGAGE);
 export const CategorySchema = z.enum(CATEGORIES);
 
 export const MemberSchema = z.object({
   id: z.string().min(1),
-  name: z.string().min(1),
+  name: z.string().min(1).max(MAX_MEMBER_NAME_LENGTH),
   kind: z.enum(['adult', 'child']),
 });
 
@@ -33,9 +39,9 @@ export const LuggageEntrySchema = z.object({
 
 export const TripInputSchema = z
   .object({
-    city: z.string().min(1),
+    city: z.string().min(1).max(MAX_CITY_LENGTH),
     // Filled from the picked city (no form field); saved to trips.country.
-    country: z.string().optional(),
+    country: z.string().max(MAX_COUNTRY_LENGTH).optional(),
     latitude: z.number().min(-90).max(90),
     longitude: z.number().min(-180).max(180),
     // z.iso.date() rejects impossible dates like 2026-02-31, which Date.UTC would roll over.
@@ -45,10 +51,11 @@ export const TripInputSchema = z
     luggage: z
       .array(LuggageEntrySchema)
       .min(1)
+      .max(LUGGAGE.length)
       .refine((entries) => new Set(entries.map((e) => e.type)).size === entries.length, {
         message: 'Each luggage type may be listed only once',
       }),
-    members: z.array(MemberSchema).min(1),
+    members: z.array(MemberSchema).min(1).max(MAX_MEMBERS),
     notes: z.string().max(500).optional(),
   })
   .refine((trip) => trip.endDate >= trip.startDate, {

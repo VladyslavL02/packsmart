@@ -1,9 +1,8 @@
-import { removeMember, renameMember, setMemberCount } from '../../engine/tripForm';
+import { MAX_PER_KIND, removeMember, renameMember, setMemberCount } from '../../engine/tripForm';
 import type { Member } from '../../engine/types';
 import { MemberChip } from '../molecules/MemberChip';
 import { Stepper } from '../molecules/Stepper';
 
-const MAX_PER_KIND = 10;
 const KINDS = [
   { kind: 'adult', label: 'Adults' },
   { kind: 'child', label: 'Kids' },

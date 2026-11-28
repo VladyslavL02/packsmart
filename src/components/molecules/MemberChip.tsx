@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { MAX_NAME_LENGTH } from '../../engine/tripForm';
 import type { Member } from '../../engine/types';
 import { Pill } from '../atoms/Pill';
 
@@ -44,7 +45,7 @@ export function MemberChip({ member, removable, onRename, onRemove }: MemberChip
           autoFocus
           className="w-24 bg-transparent focus:outline-none"
           aria-label={`New name for ${member.name}`}
-          maxLength={30}
+          maxLength={MAX_NAME_LENGTH}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commit}

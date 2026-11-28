@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   LUGGAGE_LABELS,
+  MAX_NAME_LENGTH,
+  MAX_PER_KIND,
   canGenerate,
   initialForm,
   removeMember,
@@ -13,6 +15,7 @@ import {
   type TripCity,
   type TripForm,
 } from './tripForm';
+import { MAX_MEMBERS, MAX_MEMBER_NAME_LENGTH } from './types';
 import type { LuggageEntry, Member } from './types';
 
 const TODAY = '2026-06-01';
@@ -45,6 +48,13 @@ const idMaker = () => {
 
   return () => `new-${++n}`;
 };
+
+describe('form limits', () => {
+  it('stay within the schema limits for members and names', () => {
+    expect(2 * MAX_PER_KIND).toBeLessThanOrEqual(MAX_MEMBERS);
+    expect(MAX_NAME_LENGTH).toBeLessThanOrEqual(MAX_MEMBER_NAME_LENGTH);
+  });
+});
 
 describe('initialForm', () => {
   it('starts empty with a city trip, one carry-on and one adult', () => {

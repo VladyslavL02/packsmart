@@ -103,6 +103,19 @@ describe('POST /api/suggest', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('returns 400 unavailable and no fetch for an oversize trip', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const oversize = { ...validBody, trip: { ...validBody.trip, city: 'x'.repeat(101) } };
+
+    const res = await POST(makeRequest(JSON.stringify(oversize)));
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(await res.json()).toEqual({ items: [], status: 'unavailable' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('returns 400 with empty items for a non-JSON body', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

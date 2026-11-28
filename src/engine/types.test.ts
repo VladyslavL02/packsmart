@@ -36,6 +36,9 @@ const validTrip = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const members = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({ id: `m${i + 1}`, name: `Member ${i + 1}`, kind: 'adult' }));
+
 const validDraft = (overrides: Record<string, unknown> = {}) => ({
   key: 'passport',
   title: 'Passport',
@@ -226,6 +229,48 @@ describe('TripInputSchema', () => {
   it('accepts a trip without notes', () => {
     expect(TripInputSchema.safeParse(without(validTrip(), 'notes')).success).toBe(true);
   });
+
+  it.each(['city', 'country'])('accepts a %s of 100 characters', (field) => {
+    const trip = validTrip({ [field]: 'x'.repeat(100) });
+    expect(TripInputSchema.safeParse(trip).success).toBe(true);
+  });
+
+  it.each(['city', 'country'])('rejects a %s of 101 characters', (field) => {
+    const trip = validTrip({ [field]: 'x'.repeat(101) });
+    expect(TripInputSchema.safeParse(trip).success).toBe(false);
+  });
+
+  it('accepts 20 members', () => {
+    expect(TripInputSchema.safeParse(validTrip({ members: members(20) })).success).toBe(true);
+  });
+
+  it('rejects 21 members', () => {
+    expect(TripInputSchema.safeParse(validTrip({ members: members(21) })).success).toBe(false);
+  });
+
+  it('accepts a member name of 40 characters', () => {
+    const trip = validTrip({ members: [{ id: 'm1', name: 'x'.repeat(40), kind: 'adult' }] });
+    expect(TripInputSchema.safeParse(trip).success).toBe(true);
+  });
+
+  it('rejects a member name of 41 characters', () => {
+    const trip = validTrip({ members: [{ id: 'm1', name: 'x'.repeat(41), kind: 'adult' }] });
+    expect(TripInputSchema.safeParse(trip).success).toBe(false);
+  });
+
+  it('accepts one luggage entry of each type', () => {
+    const luggage = LUGGAGE.map((type) => ({ type, count: 1 }));
+    expect(TripInputSchema.safeParse(validTrip({ luggage })).success).toBe(true);
+  });
+
+  it('reports too_big on luggage for 4 entries', () => {
+    const luggage = [...LUGGAGE, LUGGAGE[0]].map((type) => ({ type, count: 1 }));
+    const result = TripInputSchema.safeParse(validTrip({ luggage }));
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toContainEqual(
+      expect.objectContaining({ code: 'too_big', path: ['luggage'] }),
+    );
+  });
 });
 
 describe('LuggageEntrySchema', () => {
@@ -415,6 +460,16 @@ describe('SuggestRequestSchema', () => {
 
   it('rejects an invalid nested trip', () => {
     const trip = validTrip({ startDate: '2026-06-07', endDate: '2026-06-01' });
+    expect(SuggestRequestSchema.safeParse(validRequest({ trip })).success).toBe(false);
+  });
+
+  it('rejects a trip with a 101-character city', () => {
+    const trip = validTrip({ city: 'x'.repeat(101) });
+    expect(SuggestRequestSchema.safeParse(validRequest({ trip })).success).toBe(false);
+  });
+
+  it('rejects a trip with 21 members', () => {
+    const trip = validTrip({ members: members(21) });
     expect(SuggestRequestSchema.safeParse(validRequest({ trip })).success).toBe(false);
   });
 
