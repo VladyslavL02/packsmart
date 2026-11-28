@@ -1,4 +1,6 @@
 {
+  // Vercel type-checks api/ against this file, not tsconfig.node.json.
+  "compilerOptions": { "types": ["node"] },
   "files": [],
   "references": [
     { "path": "./tsconfig.app.json" },
