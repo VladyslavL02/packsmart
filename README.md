@@ -212,15 +212,11 @@ A trip's link contains a random uuid. That keeps other trips from showing up in 
 
 I built PackSmart with [Claude Code](https://claude.com/claude-code), and I set up the project so that checks are part of the workflow, not something to remember. The whole setup is in this repo: [`CLAUDE.md`](CLAUDE.md), [`.claude/`](.claude) and [`.mcp.json`](.mcp.json).
 
-```mermaid
-flowchart LR
-  Plan["Plan<br/>I approve it"] --> Tests["Tests<br/>first"]
-  Tests --> Build["Build<br/>+ edit hook"]
-  Build --> Review["Review<br/>agents + QA"]
-  Review --> Verify["change-<br/>verifier"]
-  Verify -->|approved| Commit["Commit on<br/>develop"]
-  Verify -->|rejected| Build
-```
+**The usual loop:**
+
+> **Plan** (I approve it) → **tests first** → **build**, with a post-edit hook → **review** agents and browser QA → **`change-verifier`** → **commit** on `develop`
+>
+> If the verifier rejects the change, it goes back to build.
 
 **Agents**, each with one job. None of the reviewers has a file-editing tool.
 
