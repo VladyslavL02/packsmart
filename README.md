@@ -76,22 +76,16 @@ The weather comes from the best source available:
 
 ```mermaid
 flowchart LR
-  subgraph Browser["Browser (React app)"]
-    UI["Pages and components"]
-    Store["Zustand store"]
-    Engine["Packing engine<br/>(pure TypeScript)"]
-  end
+  App["Browser<br/>React app + packing engine"]
   Meteo["Open-Meteo<br/>cities and weather"]
-  Api["/api/suggest<br/>(Vercel Function)"]
+  Api["/api/suggest<br/>Vercel Function"]
   Gemini["Gemini"]
   DB[("Supabase<br/>Postgres + Realtime")]
 
-  UI --> Store
-  Store --> Engine
-  UI -->|"city search, forecast, history"| Meteo
-  Store -->|"trip, weather, current list"| Api
+  App -->|"city search, weather"| Meteo
+  App -->|"trip, weather, list"| Api
   Api -->|"prompt"| Gemini
-  Store <-->|"rows and live changes"| DB
+  App <-->|"rows, live changes"| DB
 ```
 
 1. You describe the trip. The browser asks Open-Meteo for the weather.
@@ -219,15 +213,13 @@ A trip's link contains a random uuid. That keeps other trips from showing up in 
 I built PackSmart with [Claude Code](https://claude.com/claude-code), and I set up the project so that checks are part of the workflow, not something to remember. The whole setup is in this repo: [`CLAUDE.md`](CLAUDE.md), [`.claude/`](.claude) and [`.mcp.json`](.mcp.json).
 
 ```mermaid
-flowchart TD
-  Plan["Plan mode: I approve the plan"] --> Tests["Write tests first"]
-  Tests --> Build["Build"]
-  Build --> Hook["Post-edit hook: lint fix, typecheck, engine tests"]
-  Hook --> Review["Review agents and browser QA"]
-  Review --> Verify["change-verifier runs the change"]
-  Verify --> Gate{"Commit gate: is this exact diff approved?"}
-  Gate -->|yes| Commit["Commit on develop"]
-  Gate -->|no| Build
+flowchart LR
+  Plan["Plan<br/>I approve it"] --> Tests["Tests<br/>first"]
+  Tests --> Build["Build<br/>+ edit hook"]
+  Build --> Review["Review<br/>agents + QA"]
+  Review --> Verify["change-<br/>verifier"]
+  Verify -->|approved| Commit["Commit on<br/>develop"]
+  Verify -->|rejected| Build
 ```
 
 **Agents**, each with one job. None of the reviewers has a file-editing tool.
