@@ -183,7 +183,7 @@ npm run dev   # Vite only: no /api, so you get a Retry button instead of AI item
 
 1. **Import the repo into Vercel** with the Vite preset. [`vercel.json`](vercel.json) rewrites app routes to `index.html`, so reloading `/trip/<id>` works.
 2. **Add the three environment variables** for Production and Preview. Mark `GEMINI_API_KEY` as sensitive. The `VITE_*` values are baked in at build time, so redeploy after changing them.
-3. **Branches:** `main` deploys to production and `develop` gets preview deployments.
+3. **Branches:** only `main` deploys from Git, to production. [`vercel.json`](vercel.json) turns off Git deployments for every other branch.
 4. **Rate-limit the AI route** with a Vercel Firewall custom rule: path equals `/api/suggest`, 10 requests per 60 seconds per IP, action 429.
 5. **Check Supabase before sharing the link.** Free projects pause after inactivity, so restore it if needed.
 
