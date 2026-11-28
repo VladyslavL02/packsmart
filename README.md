@@ -210,11 +210,11 @@ A trip's link contains a random uuid. That keeps other trips from showing up in 
 
 ## Built with Claude Code
 
-I built PackSmart with [Claude Code](https://claude.com/claude-code), and I set up the project so that checks are part of the workflow, not something to remember. The whole setup is in this repo: [`CLAUDE.md`](CLAUDE.md), [`.claude/`](.claude) and [`.mcp.json`](.mcp.json).
+PackSmart was built with [Claude Code](https://claude.com/claude-code). The project is set up so that checks are part of the workflow, not something to remember. The whole setup is in this repo: [`CLAUDE.md`](CLAUDE.md), [`.claude/`](.claude) and [`.mcp.json`](.mcp.json).
 
 **The usual loop:**
 
-> **Plan** (I approve it) → **tests first** → **build**, with a post-edit hook → **review** agents and browser QA → **`change-verifier`** → **commit** on `develop`
+> **Plan** (approved before any code) → **tests first** → **build**, with a post-edit hook → **review** agents and browser QA → **`change-verifier`** → **commit** on `develop`
 >
 > If the verifier rejects the change, it goes back to build.
 
@@ -256,7 +256,7 @@ I built PackSmart with [Claude Code](https://claude.com/claude-code), and I set 
 
 ## What Claude Code caught
 
-I logged friction while building. Of 97 entries, 29 were first raised by a review agent, 5 by Playwright browser runs and 34 by manual review. Five that mattered:
+Friction was logged during the build. Of 97 entries, 29 were first raised by a review agent, 5 by Playwright browser runs and 34 by manual review. Five that mattered:
 
 | What broke | Caught by | Fix |
 | --- | --- | --- |
