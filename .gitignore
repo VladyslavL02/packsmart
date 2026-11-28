@@ -35,3 +35,6 @@ PLAN.md
 
 # Playwright MCP screenshots and cache
 .playwright-mcp/
+# qa-auditor saves some files to the repo root
+/qa-*.png
+/qa-*.yml
