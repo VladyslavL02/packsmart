@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": { "deploymentEnabled": { "**": false, "main": true } },
+  "functions": {
+    "api/keepalive.ts": { "experimentalTriggers": [{ "type": "schedule/v1beta" }] }
+  },
+  "schedules": {
+    "supabase-keepalive": { "schedule": "0 6 * * 1,4", "function": "api/keepalive" }
+  },
   "rewrites": [{ "source": "/((?!api/|@|src/|node_modules/|favicon\\.png).*)", "destination": "/index.html" }]
 }
