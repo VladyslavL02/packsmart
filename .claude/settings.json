@@ -1,0 +1,107 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run typecheck)",
+      "Bash(npm test)",
+      "Bash(npm test *)",
+      "Bash(npm run lint)",
+      "Bash(npx vitest run)",
+      "Bash(npx vitest run *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git diff)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch --show-current)",
+      "Bash(.claude/hooks/mark-verified.sh)",
+      "Bash(npx tsx -e *)",
+      "mcp__supabase__list_tables",
+      "mcp__supabase__list_migrations",
+      "mcp__supabase__list_extensions",
+      "mcp__supabase__get_advisors",
+      "mcp__supabase__search_docs",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_network_requests"
+    ],
+    "deny": [
+      "Bash(git push origin main)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin HEAD:main)",
+      "Bash(git push origin HEAD:main:*)",
+      "Bash(git push origin *:main)",
+      "Bash(git push origin *:refs/heads/main)",
+      "Bash(git push -f *)",
+      "Bash(git push --force *)",
+      "Bash(git push --force-with-lease *)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+      "Bash(git push * --force)",
+      "Bash(git push * --force *)",
+      "Bash(git push * --force-with-lease*)",
+      "Bash(git push * main)",
+      "Bash(git push * main*)",
+      "Bash(git push * HEAD:main)",
+      "Bash(git push * HEAD:main*)",
+      "Bash(git push * *:main)",
+      "Bash(git push * *:refs/heads/main)",
+      "Bash(git push)",
+      "Bash(git push origin)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr create *--base main*)",
+      "Bash(gh pr create *-B main*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean *)",
+      "Bash(git branch -D *)",
+      "Bash(git push *--delete*)",
+      "Bash(rm -rf *)",
+      "Bash(vercel --prod*)",
+      "Bash(vercel env *)",
+      "Bash(vercel rm *)",
+      "Bash(supabase db reset*)",
+      "Bash(supabase db push*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(./.env*)",
+      "Edit(./.env*)",
+      "Read(**/.env*)",
+      "Edit(**/.env*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-env.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/require-verified.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit-check.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -23,7 +23,15 @@ dist-ssr
 *.sln
 *.sw?
 
-.env
-.env.local
+.env*
+!.env.example
+.vercel
 design-ref/
-DEVLOG.md
+/DEVLOG.md
+PLAN.md
+
+# change-verifier commit gate marker
+.claude/.verified-diff
+
+# Playwright MCP screenshots and cache
+.playwright-mcp/
