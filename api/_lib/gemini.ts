@@ -170,19 +170,44 @@ export function parseGeminiResponse(json: unknown): AiSuggestion[] | null {
   return items.slice(0, MAX_AI_ITEMS);
 }
 
-const unavailable = (): SuggestResponse => ({ items: [], status: 'unavailable' });
+type LogReason =
+  | 'no_key'
+  | `http_${number}`
+  | 'unparseable'
+  | 'timeout'
+  | 'aborted'
+  | 'truncated'
+  | 'network';
+
+// Every exit of getAiSuggestions returns through here, so each call logs exactly one line.
+function logOutcome(
+  status: SuggestResponse['status'],
+  startedAt: number,
+  items: AiSuggestion[],
+  detail?: { reason: LogReason; err?: string },
+): SuggestResponse {
+  let line = `[gemini] outcome=${status} ms=${Date.now() - startedAt} items=${items.length}`;
+  if (detail) {line += ` reason=${detail.reason}`;}
+  if (detail?.err) {line += ` err=${detail.err}`;}
+  if (status === 'ok') {
+    console.info(line);
+  } else {
+    console.warn(line);
+  }
+
+  return { items, status };
+}
 
 export async function getAiSuggestions(
   req: SuggestRequest,
   apiKey: string | undefined,
   signal?: AbortSignal,
 ): Promise<SuggestResponse> {
-  if (!apiKey) {
-    console.warn('[gemini] no API key');
-
-    return unavailable();
-  }
-  if (signal?.aborted) {return unavailable();}
+  const startedAt = Date.now();
+  const fail = (reason: LogReason, err?: string) =>
+    logOutcome('unavailable', startedAt, [], { reason, err });
+  if (!apiKey) {return fail('no_key');}
+  if (signal?.aborted) {return fail('aborted');}
 
   const timeout = AbortSignal.timeout(GEMINI_TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -205,40 +230,32 @@ export async function getAiSuggestions(
       });
     let response = await send();
     if (RETRY_STATUSES.includes(response.status)) {
-      console.warn('[gemini] HTTP', response.status, 'retrying');
       await wait(RETRY_DELAY_MS, combined);
       response = await send();
     }
-    if (!response.ok) {
-      console.warn('[gemini] HTTP', response.status);
-
-      return unavailable();
-    }
-    const json: unknown = await response.json();
+    if (!response.ok) {return fail(`http_${response.status}`);}
+    // A body that is not JSON is a SyntaxError; a timeout or abort while reading it is not.
+    const json: unknown = await response.json().catch((error: unknown) => {
+      if (error instanceof SyntaxError) {return null;}
+      throw error;
+    });
     const finish = FinishSchema.safeParse(json);
-    if (finish.success) {
-      const { finishReason } = finish.data.candidates[0];
-      console.log('[gemini] finishReason', finishReason);
-      if (finishReason === 'MAX_TOKENS') {console.warn('[gemini] truncated');}
-    }
+    const truncated = finish.success && finish.data.candidates[0].finishReason === 'MAX_TOKENS';
     const items = parseGeminiResponse(json);
-    if (items === null) {
-      console.warn('[gemini] unparseable response');
+    if (items === null) {return fail(truncated ? 'truncated' : 'unparseable');}
 
-      return unavailable();
-    }
-    if (items.length === 0) {
-      console.warn('[gemini] no valid items');
-
-      return { items: [], status: 'empty' };
-    }
-
-    return { items, status: 'ok' };
+    return logOutcome(
+      items.length > 0 ? 'ok' : 'empty',
+      startedAt,
+      items,
+      truncated ? { reason: 'truncated' } : undefined,
+    );
   } catch (error) {
-    if (signal?.aborted) {return unavailable();}
-    // Name only: a fetch error message can quote the x-goog-api-key header value.
-    console.warn('[gemini] request failed', error instanceof Error ? error.name : 'unknown');
+    if (signal?.aborted) {return fail('aborted');}
+    const name = error instanceof Error ? error.name : 'unknown';
+    if (name === 'TimeoutError') {return fail('timeout');}
 
-    return unavailable();
+    // Name only: a fetch error message can quote the x-goog-api-key header value.
+    return fail('network', name);
   }
 }

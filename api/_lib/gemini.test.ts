@@ -219,10 +219,14 @@ describe('buildPrompt', () => {
 });
 
 describe('getAiSuggestions', () => {
+  let info: ReturnType<typeof vi.spyOn>;
   let warn: ReturnType<typeof vi.spyOn>;
+  let log: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -230,7 +234,24 @@ describe('getAiSuggestions', () => {
     vi.restoreAllMocks();
   });
 
-  const warnedText = () => JSON.stringify(warn.mock.calls);
+  const logLines = (): unknown[][] => [...info.mock.calls, ...warn.mock.calls];
+  const loggedText = () => JSON.stringify(logLines());
+
+  // Exactly one line for the call, on the given channel, as a single string argument.
+  const onlyLine = (channel: 'info' | 'warn' = 'warn'): string => {
+    const lines = logLines();
+    expect(lines).toHaveLength(1);
+    expect((channel === 'info' ? info : warn).mock.calls).toHaveLength(1);
+    expect(lines[0]).toEqual([expect.any(String)]);
+
+    return lines[0][0] as string;
+  };
+
+  const okLine = (items: number, suffix = '') =>
+    new RegExp(`^\\[gemini\\] outcome=ok ms=\\d+ items=${items}${suffix}$`);
+  const emptyLine = (suffix = '') => new RegExp(`^\\[gemini\\] outcome=empty ms=\\d+ items=0${suffix}$`);
+  const unavailableLine = (reason: string) =>
+    new RegExp(`^\\[gemini\\] outcome=unavailable ms=\\d+ items=0 reason=${reason}$`);
 
   it('returns parsed items and sends the right request', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(envelopeOf([item('Umbrella')])));
@@ -262,16 +283,25 @@ describe('getAiSuggestions', () => {
   it('is unavailable without calling fetch when the key is missing', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    expect(await getAiSuggestions(req, undefined)).toEqual(UNAVAILABLE);
-    expect(await getAiSuggestions(req, '')).toEqual(UNAVAILABLE);
+    for (const key of [undefined, '']) {
+      warn.mockClear();
+      expect(await getAiSuggestions(req, key)).toEqual(UNAVAILABLE);
+      expect(onlyLine()).toMatch(unavailableLine('no_key'));
+    }
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('logs one info line with outcome=ok and the item count', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(envelopeOf([item('Umbrella')]))));
+    expect((await getAiSuggestions(req, KEY)).status).toBe('ok');
+    expect(onlyLine('info')).toMatch(okLine(1));
   });
 
   it('is unavailable on HTTP 500 and does not log the body', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'echoed prompt London' }, 500)));
     expect(await getAiSuggestions(req, KEY)).toEqual(UNAVAILABLE);
-    expect(warn).toHaveBeenCalledWith('[gemini] HTTP', 500);
-    expect(warnedText()).not.toContain('echoed');
+    expect(onlyLine()).toMatch(unavailableLine('http_500'));
+    expect(loggedText()).not.toContain('echoed');
   });
 
   it('is unavailable on a timeout', async () => {
@@ -279,6 +309,7 @@ describe('getAiSuggestions', () => {
       throw new DOMException('timeout', 'TimeoutError');
     }));
     expect(await getAiSuggestions(req, KEY)).toEqual(UNAVAILABLE);
+    expect(onlyLine()).toMatch(unavailableLine('timeout'));
   });
 
   it('is unavailable on a network error', async () => {
@@ -286,6 +317,8 @@ describe('getAiSuggestions', () => {
       throw new TypeError('fetch failed');
     }));
     expect(await getAiSuggestions(req, KEY)).toEqual(UNAVAILABLE);
+    expect(onlyLine()).toMatch(unavailableLine('network err=TypeError'));
+    expect(loggedText()).not.toContain('fetch failed');
   });
 
   it('is unavailable without fetching when the caller signal is already aborted', async () => {
@@ -295,6 +328,7 @@ describe('getAiSuggestions', () => {
     controller.abort();
     expect(await getAiSuggestions(req, KEY, controller.signal)).toEqual(UNAVAILABLE);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(onlyLine()).toMatch(unavailableLine('aborted'));
   });
 
   it('is unavailable when the caller aborts mid-flight', async () => {
@@ -308,6 +342,7 @@ describe('getAiSuggestions', () => {
     const pending = getAiSuggestions(req, KEY, caller.signal);
     caller.abort();
     expect(await pending).toEqual(UNAVAILABLE);
+    expect(onlyLine()).toMatch(unavailableLine('aborted'));
   });
 
   it.each([
@@ -319,7 +354,7 @@ describe('getAiSuggestions', () => {
   ])('is unavailable for %s', async (_label, body) => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(body)));
     expect(await getAiSuggestions(req, KEY)).toEqual(UNAVAILABLE);
-    expect(warn).toHaveBeenCalledWith('[gemini] unparseable response');
+    expect(onlyLine()).toMatch(unavailableLine('unparseable'));
   });
 
   it.each([
@@ -328,24 +363,41 @@ describe('getAiSuggestions', () => {
   ])('is unavailable and logs truncation for %s', async (_label, candidate) => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ candidates: [candidate] })));
     expect(await getAiSuggestions(req, KEY)).toEqual(UNAVAILABLE);
-    expect(warn).toHaveBeenCalledWith('[gemini] truncated');
-    expect(warnedText()).not.toContain('Umb');
+    expect(onlyLine()).toMatch(unavailableLine('truncated'));
+    expect(loggedText()).not.toContain('Umb');
   });
 
-  it('logs the finish reason, so truncation margin can be checked in the server log', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  it('never calls console.log', async () => {
     const { content } = envelopeOf([item('Umbrella')]).candidates[0];
     const body = { candidates: [{ content, finishReason: 'STOP' }] };
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(body)));
 
     expect((await getAiSuggestions(req, KEY)).status).toBe('ok');
-    expect(log).toHaveBeenCalledWith('[gemini] finishReason', 'STOP');
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('adds reason=truncated to an ok line when the finish reason is MAX_TOKENS', async () => {
+    const { content } = envelopeOf([item('Umbrella')]).candidates[0];
+    const body = { candidates: [{ content, finishReason: 'MAX_TOKENS' }] };
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(body)));
+
+    expect((await getAiSuggestions(req, KEY)).status).toBe('ok');
+    expect(onlyLine('info')).toMatch(okLine(1, ' reason=truncated'));
+  });
+
+  it('adds reason=truncated to an empty line when the finish reason is MAX_TOKENS', async () => {
+    const { content } = envelopeOf([]).candidates[0];
+    const body = { candidates: [{ content, finishReason: 'MAX_TOKENS' }] };
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(body)));
+
+    expect((await getAiSuggestions(req, KEY)).status).toBe('empty');
+    expect(onlyLine()).toMatch(emptyLine(' reason=truncated'));
   });
 
   it('is empty when the model returns an empty array', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(envelopeOf([]))));
     expect(await getAiSuggestions(req, KEY)).toEqual({ items: [], status: 'empty' });
-    expect(warn).toHaveBeenCalledWith('[gemini] no valid items');
+    expect(onlyLine()).toMatch(emptyLine());
   });
 
   it('is empty when every item is invalid', async () => {
@@ -358,9 +410,12 @@ describe('getAiSuggestions', () => {
   it('is unavailable when the response body is not JSON', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>', { status: 200 })));
     expect(await getAiSuggestions(req, KEY)).toEqual(UNAVAILABLE);
+    expect(onlyLine()).toMatch(unavailableLine('unparseable'));
   });
 
   it('never logs the key or the prompt', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(envelopeOf([item('Umbrella')]))));
+    await getAiSuggestions(req, KEY);
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({}, 500)));
     await getAiSuggestions(req, KEY);
     vi.stubGlobal('fetch', vi.fn(async () => {
@@ -368,9 +423,9 @@ describe('getAiSuggestions', () => {
     }));
     await getAiSuggestions(req, KEY);
     await getAiSuggestions(req, undefined);
-    expect(warn).toHaveBeenCalled();
-    expect(warnedText()).not.toContain(KEY);
-    expect(warnedText()).not.toContain('client dinner');
+    expect(logLines()).toHaveLength(4);
+    expect(loggedText()).not.toContain(KEY);
+    expect(loggedText()).not.toContain('client dinner');
   });
 
   // fetch quotes the whole header value when it is invalid, e.g. a key pasted with a line break.
@@ -381,8 +436,8 @@ describe('getAiSuggestions', () => {
     }));
 
     expect(await getAiSuggestions(req, badKey)).toEqual(UNAVAILABLE);
-    expect(warn).toHaveBeenCalledWith('[gemini] request failed', 'TypeError');
-    expect(warnedText()).not.toContain('secret-part');
+    expect(onlyLine()).toMatch(unavailableLine('network err=TypeError'));
+    expect(loggedText()).not.toContain('secret-part');
   });
 
   describe('retry', () => {
@@ -412,6 +467,8 @@ describe('getAiSuggestions', () => {
       expect(out.status).toBe('ok');
       expect(out.items.map((i) => i.title)).toEqual(['Umbrella']);
       expect(fetchMock).toHaveBeenCalledTimes(2);
+      // Fake timers drive Date.now(), so ms is exactly the retry delay.
+      expect(onlyLine('info')).toBe(`[gemini] outcome=ok ms=${RETRY_DELAY_MS} items=1`);
     });
 
     it('gives up after two 503s, unavailable with a warning', async () => {
@@ -424,7 +481,21 @@ describe('getAiSuggestions', () => {
 
       expect(await pending).toEqual(UNAVAILABLE);
       expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(warn).toHaveBeenCalled();
+      expect(onlyLine()).toMatch(unavailableLine('http_503'));
+    });
+
+    it('logs only the final status when the retry fails with a different one', async () => {
+      vi.useFakeTimers();
+      const fetchMock = vi.fn()
+        .mockImplementationOnce(async () => status(503))
+        .mockImplementationOnce(async () => status(500));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const pending = getAiSuggestions(req, KEY);
+      await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS);
+
+      expect(await pending).toEqual(UNAVAILABLE);
+      expect(onlyLine()).toMatch(unavailableLine('http_500'));
     });
 
     it('does not retry on HTTP 500', async () => {
@@ -453,6 +524,7 @@ describe('getAiSuggestions', () => {
 
       expect(await pending).toEqual(UNAVAILABLE);
       expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(onlyLine()).toMatch(unavailableLine('aborted'));
     });
   });
 });
