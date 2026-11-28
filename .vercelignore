@@ -1,0 +1,2 @@
+# Vercel deploys every file under api/ as a function, so keep tests out of the upload.
+api/**/*.test.ts
